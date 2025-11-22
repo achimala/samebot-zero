@@ -7,25 +7,35 @@ import { DateTime } from "luxon";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import type { ChatMessage } from "../openai/client";
 import type { BotError } from "../core/errors";
+import {
+  ResponseDecision,
+  type ConversationContext,
+} from "../utils/response-decision";
 
 const PERSONA = `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic british tone.
 you keep responses short, rarely use emojis, and occasionally swear for comedic effect.`;
 
-interface ConversationState {
-  history: ChatMessage[];
+interface ConversationState extends ConversationContext {
   lastResponseAt?: number;
-  isDm: boolean;
 }
 
 export class ConversationFeature implements Feature {
   private ctx!: RuntimeContext;
   private botUserId?: string;
   private readonly contexts = new Map<string, ConversationState>();
+  private responseDecision!: ResponseDecision;
 
   register(context: RuntimeContext): void {
     this.ctx = context;
+    this.responseDecision = new ResponseDecision({
+      openai: context.openai,
+    });
     context.discord.once("ready", (client) => {
       this.botUserId = client.user.id;
+      this.responseDecision = new ResponseDecision({
+        openai: context.openai,
+        botUserId: client.user.id,
+      });
     });
     context.discord.on("messageCreate", (message) => {
       void this.handleMessage(message);
@@ -48,17 +58,24 @@ export class ConversationFeature implements Feature {
 
     const key = message.channelId || message.author.id;
     const isDm = !message.inGuild();
-    const context = this.contexts.get(key) ?? { history: [], isDm };
+    const context = this.contexts.get(key) ?? {
+      history: [],
+      isDm,
+    };
     context.isDm = isDm;
     this.contexts.set(key, context);
 
     const formatted = `${
       message.author.displayName || message.author.username
     }: ${this.enrichContent(message)}`;
-    context.history.push({ role: "user", content: formatted });
+    context.history.push({
+      role: "user",
+      content: formatted,
+      timestamp: message.createdTimestamp,
+    });
     context.history = context.history.slice(-12);
 
-    if (!this.shouldRespond(message, context)) {
+    if (!(await this.responseDecision.shouldRespond(message, context))) {
       return;
     }
 
@@ -68,7 +85,7 @@ export class ConversationFeature implements Feature {
         role: "system",
         content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
       },
-      ...context.history,
+      ...context.history.map(({ timestamp, ...msg }) => msg),
     ];
 
     const response = await this.ctx.openai.chat({
@@ -77,7 +94,11 @@ export class ConversationFeature implements Feature {
     });
     await response.match(
       async (reply) => {
-        context.history.push({ role: "assistant", content: reply });
+        context.history.push({
+          role: "assistant",
+          content: reply,
+          timestamp: Date.now(),
+        });
         context.history = context.history.slice(-12);
         context.lastResponseAt = Date.now();
         await this.ctx.messenger.replyToMessage(message, reply).match(
@@ -109,29 +130,6 @@ export class ConversationFeature implements Feature {
         }
       },
     );
-  }
-
-  private shouldRespond(message: Message, context: ConversationState) {
-    if (context.isDm) {
-      return true;
-    }
-    if (!message.inGuild()) {
-      return true;
-    }
-    const content = message.content.toLowerCase();
-    if (content.includes("samebot")) {
-      return true;
-    }
-    if (this.botUserId && message.mentions.users.has(this.botUserId)) {
-      return true;
-    }
-    if (
-      context.lastResponseAt &&
-      Date.now() - context.lastResponseAt < 15_000
-    ) {
-      return true;
-    }
-    return false;
   }
 
   private enrichContent(message: Message) {
