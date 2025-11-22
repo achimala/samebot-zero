@@ -63,7 +63,7 @@ export class ResponseDecision {
       messages: [
         {
           role: "system",
-          content: `You are analyzing a Discord conversation to determine if samebot (a bot) should respond to the latest message.
+          content: `You are analysing a Discord conversation to determine if samebot (a bot) should respond to the latest message.
 
 Be CONSERVATIVE. Only return true if:
 - It's clearly obvious the user is talking TO samebot or expecting a response FROM samebot
