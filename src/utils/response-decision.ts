@@ -101,9 +101,13 @@ Return false when in doubt.`,
     return decision.match(
       (result) => {
         if (result.shouldRespond) {
-          this.options.logger?.debug("Responding: AI determined response is appropriate");
+          this.options.logger?.debug(
+            "Responding: AI determined response is appropriate",
+          );
         } else {
-          this.options.logger?.debug("Not responding: AI determined response is not appropriate");
+          this.options.logger?.debug(
+            "Not responding: AI determined response is not appropriate",
+          );
         }
         return result.shouldRespond;
       },

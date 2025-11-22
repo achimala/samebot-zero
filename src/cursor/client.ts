@@ -68,9 +68,7 @@ export class CursorClient {
           "Failed to launch agent",
         );
         return err(
-          new Error(
-            `Cursor API error: ${response.status} - ${errorText}`,
-          ),
+          new Error(`Cursor API error: ${response.status} - ${errorText}`),
         );
       }
 
@@ -99,9 +97,7 @@ export class CursorClient {
           "Failed to get agent status",
         );
         return err(
-          new Error(
-            `Cursor API error: ${response.status} - ${errorText}`,
-          ),
+          new Error(`Cursor API error: ${response.status} - ${errorText}`),
         );
       }
 
@@ -119,18 +115,21 @@ export class CursorClient {
   ): Promise<Result<{ id: string }, Error>> {
     try {
       const authHeader = `Basic ${Buffer.from(`${this.apiKey}:`).toString("base64")}`;
-      const response = await fetch(`${this.baseUrl}/agents/${agentId}/followup`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: authHeader,
-        },
-        body: JSON.stringify({
-          prompt: {
-            text: instructions,
+      const response = await fetch(
+        `${this.baseUrl}/agents/${agentId}/followup`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: authHeader,
           },
-        }),
-      });
+          body: JSON.stringify({
+            prompt: {
+              text: instructions,
+            },
+          }),
+        },
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -139,9 +138,7 @@ export class CursorClient {
           "Failed to add follow-up",
         );
         return err(
-          new Error(
-            `Cursor API error: ${response.status} - ${errorText}`,
-          ),
+          new Error(`Cursor API error: ${response.status} - ${errorText}`),
         );
       }
 

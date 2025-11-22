@@ -56,7 +56,10 @@ export class AgentLaunchFeature implements Feature {
 
     await interaction.deferReply();
 
-    const { embed: initialEmbed } = this.createStatusEmbed("pending", instructions);
+    const { embed: initialEmbed } = this.createStatusEmbed(
+      "pending",
+      instructions,
+    );
     const message = await interaction.editReply({
       embeds: [initialEmbed],
     });
@@ -140,11 +143,15 @@ export class AgentLaunchFeature implements Feature {
       }
 
       let normalizedStatus = this.normalizeStatus(status.status);
-      
-      if (isFollowUp && status.status === "FINISHED" && !hasSeenRunningAfterFollowUp) {
+
+      if (
+        isFollowUp &&
+        status.status === "FINISHED" &&
+        !hasSeenRunningAfterFollowUp
+      ) {
         normalizedStatus = "running";
       }
-      
+
       this.ctx.logger.debug(
         {
           agentId: status.id,
@@ -173,7 +180,11 @@ export class AgentLaunchFeature implements Feature {
       });
 
       if (status.status === "FINISHED" || status.status === "FAILED") {
-        if (isFollowUp && status.status === "FINISHED" && !hasSeenRunningAfterFollowUp) {
+        if (
+          isFollowUp &&
+          status.status === "FINISHED" &&
+          !hasSeenRunningAfterFollowUp
+        ) {
           attempts++;
           continue;
         }
@@ -373,11 +384,11 @@ export class AgentLaunchFeature implements Feature {
 
     const agentStatus = statusResult.value;
     let normalizedStatus = this.normalizeStatus(agentStatus.status);
-    
+
     if (agentStatus.status === "FINISHED") {
       normalizedStatus = "running";
     }
-    
+
     const statusEmbedResult = this.createStatusEmbed(
       normalizedStatus,
       instructions,
