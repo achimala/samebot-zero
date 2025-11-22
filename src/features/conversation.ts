@@ -13,7 +13,8 @@ import {
 } from "../utils/response-decision";
 
 const PERSONA = `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic british tone.
-you keep responses short, rarely use emojis, and occasionally swear for comedic effect.`;
+you keep responses short, rarely use emojis, and occasionally swear for comedic effect.
+usually just respond very briefly, 10-20 words, conversationally. unless specifically asked for a lot of information or detail`;
 
 interface ConversationState extends ConversationContext {
   lastResponseAt?: number;
