@@ -34,7 +34,7 @@ export class DankResponseFeature implements Feature {
         {
           role: "system",
           content:
-            "Generate a single creative portmanteau or variation of the word 'dank' that is contextually relevant to the recent conversation. Use the conversation context to make your variation more specific and less repetitive. Examples: dankalicious, danktacular, danktastic. Respond with only the word, nothing else.",
+            "Generate a single creative portmanteau or variation that includes 'dank' anywhere in the word (beginning, middle, or end) and is contextually relevant to the recent conversation. Use the conversation context to make your variation more specific and less repetitive. Examples: dankalicious, danktacular, danktastic, superdank, megadank, dankified, radankulous. Respond with only the word, nothing else.",
         },
         {
           role: "user",
