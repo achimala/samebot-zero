@@ -21,10 +21,5 @@ export const commandDefinitions = [
         .setName("instructions")
         .setDescription("What should the agent do?")
         .setRequired(true),
-    )
-    .addStringOption((option) =>
-      option
-        .setName("branch")
-        .setDescription("Branch to work on (optional)"),
     ),
 ].map((builder) => builder.toJSON());
