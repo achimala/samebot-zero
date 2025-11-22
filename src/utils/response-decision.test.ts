@@ -157,7 +157,7 @@ describe("ResponseDecision", () => {
       expect(result).toBe(true);
     });
 
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "uses LLM when no explicit triggers",
       async () => {
         const decision = new ResponseDecision({
@@ -281,7 +281,7 @@ describe("ResponseDecision", () => {
   });
 
   describe("simulated conversations with LLM", () => {
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "should respond when user asks direct question to bot in active conversation",
       async () => {
         const decision = new ResponseDecision({
@@ -322,7 +322,7 @@ describe("ResponseDecision", () => {
       },
     );
 
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "should not respond when users are talking to each other",
       async () => {
         const decision = new ResponseDecision({
@@ -363,7 +363,7 @@ describe("ResponseDecision", () => {
       },
     );
 
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "should respond in active conversation thread with clear follow-up",
       async () => {
         const decision = new ResponseDecision({
@@ -405,7 +405,7 @@ describe("ResponseDecision", () => {
       },
     );
 
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "should not respond to ambiguous messages",
       async () => {
         const decision = new ResponseDecision({
@@ -441,7 +441,7 @@ describe("ResponseDecision", () => {
       },
     );
 
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "should respond to clear question directed at bot in active conversation",
       async () => {
         const decision = new ResponseDecision({
@@ -478,7 +478,7 @@ describe("ResponseDecision", () => {
       },
     );
 
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "should not respond to general conversation",
       async () => {
         const decision = new ResponseDecision({
@@ -510,7 +510,7 @@ describe("ResponseDecision", () => {
       },
     );
 
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "should not respond to ambiguous question without clear context",
       async () => {
         const decision = new ResponseDecision({
@@ -546,7 +546,7 @@ describe("ResponseDecision", () => {
       },
     );
 
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "should not respond when question could be for anyone",
       async () => {
         const decision = new ResponseDecision({
@@ -582,7 +582,7 @@ describe("ResponseDecision", () => {
       },
     );
 
-    it.concurrent.skipIf(!hasOpenAI)(
+    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
       "should not respond to standalone question without bot context",
       async () => {
         const decision = new ResponseDecision({

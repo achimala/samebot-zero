@@ -1,9 +1,17 @@
-import type { Client, Message, TextBasedChannel } from "discord.js";
+import type {
+  Client,
+  Message,
+  TextBasedChannel,
+  PartialGroupDMChannel,
+} from "discord.js";
+import { ChannelType } from "discord.js";
 import { ResultAsync, err } from "neverthrow";
 import type { Logger } from "pino";
 import { Errors, type BotError } from "../core/errors";
 
 const DISCORD_LIMIT = 2000;
+
+type SendableChannel = Exclude<TextBasedChannel, PartialGroupDMChannel>;
 
 export class DiscordMessenger {
   constructor(
@@ -57,7 +65,11 @@ export class DiscordMessenger {
       if (description !== undefined) {
         sendOptions.content = description;
       }
-      const sendPromise: Promise<Message> = channel.send(sendOptions);
+      const sendableChannel = this.assertSendableChannel(channel);
+      if (sendableChannel === null) {
+        return err(Errors.discord("Channel does not support sending messages"));
+      }
+      const sendPromise: Promise<Message> = sendableChannel.send(sendOptions);
       return ResultAsync.fromPromise(sendPromise, (error) => {
         this.logger.error({ err: error }, "Failed to send attachment");
         return Errors.discord("Unable to send attachment");
@@ -85,7 +97,11 @@ export class DiscordMessenger {
               return Errors.discord("Unable to send message");
             }).map<void>(() => undefined);
           }
-          const sendPromise: Promise<Message> = channel.send(chunk);
+          const sendableChannel = this.assertSendableChannel(channel);
+          if (sendableChannel === null) {
+            return err(Errors.discord("Channel does not support sending messages"));
+          }
+          const sendPromise: Promise<Message> = sendableChannel.send(chunk);
           return ResultAsync.fromPromise(sendPromise, (error) => {
             this.logger.error({ err: error }, "Failed to send message");
             return Errors.discord("Unable to send message");
@@ -94,6 +110,25 @@ export class DiscordMessenger {
       },
       ResultAsync.fromSafePromise<void>(Promise.resolve(undefined)),
     );
+  }
+
+  private isSendableChannel(
+    channel: TextBasedChannel,
+  ): channel is SendableChannel {
+    const type = channel.type;
+    if (channel.partial && type === ChannelType.GroupDM) {
+      return false;
+    }
+    return true;
+  }
+
+  private assertSendableChannel(
+    channel: TextBasedChannel,
+  ): SendableChannel | null {
+    if (this.isSendableChannel(channel)) {
+      return channel;
+    }
+    return null;
   }
 }
 
