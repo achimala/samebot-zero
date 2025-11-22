@@ -1,4 +1,9 @@
-import type { MessageReaction, User, PartialMessageReaction, PartialUser } from "discord.js";
+import type {
+  MessageReaction,
+  User,
+  PartialMessageReaction,
+  PartialUser,
+} from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 
 export class ReactionEchoFeature implements Feature {
@@ -11,7 +16,10 @@ export class ReactionEchoFeature implements Feature {
     });
   }
 
-  private async handleReaction(reaction: MessageReaction | PartialMessageReaction, user: User | PartialUser) {
+  private async handleReaction(
+    reaction: MessageReaction | PartialMessageReaction,
+    user: User | PartialUser,
+  ) {
     const fullUser = user.partial ? await user.fetch() : user;
     if (fullUser.bot) {
       return;
@@ -21,7 +29,9 @@ export class ReactionEchoFeature implements Feature {
     }
     try {
       const fullReaction = reaction.partial ? await reaction.fetch() : reaction;
-      const fetched = fullReaction.message.partial ? await fullReaction.message.fetch() : fullReaction.message;
+      const fetched = fullReaction.message.partial
+        ? await fullReaction.message.fetch()
+        : fullReaction.message;
       if (fetched.author.id === this.ctx.discord.user.id) {
         return;
       }

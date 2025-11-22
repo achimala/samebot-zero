@@ -23,7 +23,7 @@ async function main() {
     logger,
     discord: gateway.client,
     messenger,
-    openai
+    openai,
   };
 
   const features: Feature[] = [
@@ -31,7 +31,7 @@ async function main() {
     new AutoReactFeature(),
     new ReactionEchoFeature(),
     new ImageCommandFeature(),
-    new ImageOfDayFeature()
+    new ImageOfDayFeature(),
   ];
 
   features.forEach((feature) => feature.register(runtime));

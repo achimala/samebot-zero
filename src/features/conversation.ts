@@ -1,4 +1,8 @@
-import type { Message, ChatInputCommandInteraction } from "discord.js";
+import type {
+  Message,
+  ChatInputCommandInteraction,
+  GuildChannel,
+} from "discord.js";
 import { DateTime } from "luxon";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import type { ChatMessage } from "../openai/client";
@@ -48,7 +52,9 @@ export class ConversationFeature implements Feature {
     context.isDm = isDm;
     this.contexts.set(key, context);
 
-    const formatted = `${message.author.displayName || message.author.username}: ${this.enrichContent(message)}`;
+    const formatted = `${
+      message.author.displayName || message.author.username
+    }: ${this.enrichContent(message)}`;
     context.history.push({ role: "user", content: formatted });
     context.history = context.history.slice(-12);
 
@@ -60,12 +66,15 @@ export class ConversationFeature implements Feature {
     const messages: ChatMessage[] = [
       {
         role: "system",
-        content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`
+        content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
       },
-      ...context.history
+      ...context.history,
     ];
 
-    const response = await this.ctx.openai.chat({ messages, allowSearch: true });
+    const response = await this.ctx.openai.chat({
+      messages,
+      allowSearch: true,
+    });
     await response.match(
       async (reply) => {
         context.history.push({ role: "assistant", content: reply });
@@ -74,19 +83,31 @@ export class ConversationFeature implements Feature {
         await this.ctx.messenger.replyToMessage(message, reply).match(
           async () => undefined,
           async (sendError: BotError) => {
-            this.ctx.logger.error({ err: sendError }, "Failed to deliver reply");
-          }
+            this.ctx.logger.error(
+              { err: sendError },
+              "Failed to deliver reply",
+            );
+          },
         );
       },
       async (error) => {
-        this.ctx.logger.error({ err: error }, "Failed to generate chat response");
+        this.ctx.logger.error(
+          { err: error },
+          "Failed to generate chat response",
+        );
         if (error.type === "openai") {
-          await this.ctx.messenger.replyToMessage(message, "something broke, brb").match(
-            async () => undefined,
-            async (sendError: BotError) => this.ctx.logger.error({ err: sendError }, "Failed to send error message")
-          );
+          await this.ctx.messenger
+            .replyToMessage(message, "something broke, brb")
+            .match(
+              async () => undefined,
+              async (sendError: BotError) =>
+                this.ctx.logger.error(
+                  { err: sendError },
+                  "Failed to send error message",
+                ),
+            );
         }
-      }
+      },
     );
   }
 
@@ -104,7 +125,10 @@ export class ConversationFeature implements Feature {
     if (this.botUserId && message.mentions.users.has(this.botUserId)) {
       return true;
     }
-    if (context.lastResponseAt && Date.now() - context.lastResponseAt < 15_000) {
+    if (
+      context.lastResponseAt &&
+      Date.now() - context.lastResponseAt < 15_000
+    ) {
       return true;
     }
     return false;
@@ -112,6 +136,40 @@ export class ConversationFeature implements Feature {
 
   private enrichContent(message: Message) {
     let content = message.content || "";
+
+    for (const user of message.mentions.users.values()) {
+      let displayName = user.displayName || user.username;
+      if (message.inGuild()) {
+        const member = message.guild?.members.cache.get(user.id);
+        if (member) {
+          displayName = member.displayName;
+        }
+      }
+      content = content.replace(
+        new RegExp(`<@!?${user.id}>`, "g"),
+        `@${displayName}`,
+      );
+    }
+
+    if (message.inGuild()) {
+      for (const role of message.mentions.roles.values()) {
+        content = content.replace(
+          new RegExp(`<@&${role.id}>`, "g"),
+          `@${role.name}`,
+        );
+      }
+
+      for (const channel of message.mentions.channels.values()) {
+        const guildChannel = channel as GuildChannel;
+        if (guildChannel.name) {
+          content = content.replace(
+            new RegExp(`<#${channel.id}>`, "g"),
+            `#${guildChannel.name}`,
+          );
+        }
+      }
+    }
+
     if (message.attachments.size > 0) {
       const attachments = Array.from(message.attachments.values())
         .filter((attachment) => attachment.contentType?.startsWith("image"))
@@ -134,6 +192,9 @@ export class ConversationFeature implements Feature {
       .map((entry) => `${entry.role}: ${entry.content}`)
       .join("\n")
       .slice(-1900);
-    await interaction.reply({ content: `\`\`\`\n${payload}\n\`\`\``, ephemeral: true });
+    await interaction.reply({
+      content: `\`\`\`\n${payload}\n\`\`\``,
+      ephemeral: true,
+    });
   }
 }

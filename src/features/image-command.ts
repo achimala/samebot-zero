@@ -25,15 +25,15 @@ export class ImageCommandFeature implements Feature {
             {
               attachment: buffer,
               name: "samebot-image.png",
-              description: prompt
-            }
-          ]
+              description: prompt,
+            },
+          ],
         });
       },
       async (error) => {
         this.ctx.logger.error({ err: error }, "Image generation failed");
         await interaction.editReply("couldn't draw that, soz");
-      }
+      },
     );
   }
 }

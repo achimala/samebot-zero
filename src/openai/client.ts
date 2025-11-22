@@ -12,33 +12,45 @@ export type ChatMessage = {
 export class OpenAIClient {
   private readonly client: OpenAI;
 
-  constructor(private readonly config: AppConfig, private readonly logger: Logger) {
+  constructor(
+    private readonly config: AppConfig,
+    private readonly logger: Logger,
+  ) {
     this.client = new OpenAI({ apiKey: config.openAIApiKey });
   }
 
-  private formatMessageForInput(message: ChatMessage): OpenAI.Responses.ResponseInputItem {
+  private formatMessageForInput(
+    message: ChatMessage,
+  ): OpenAI.Responses.ResponseInputItem {
     if (message.role === "assistant") {
       return {
         role: "assistant" as const,
-        content: [{ type: "output_text" as const, text: message.content, annotations: [] }],
+        content: [
+          {
+            type: "output_text" as const,
+            text: message.content,
+            annotations: [],
+          },
+        ],
         id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-        status: "completed" as const
+        status: "completed" as const,
       };
     }
     return {
       role: message.role,
-      content: [{ type: "input_text" as const, text: message.content }]
+      content: [{ type: "input_text" as const, text: message.content }],
     };
   }
 
   chat(options: { messages: ChatMessage[]; allowSearch?: boolean }) {
-    const input: OpenAI.Responses.ResponseInput = options.messages.map((message) =>
-      this.formatMessageForInput(message)
+    const input: OpenAI.Responses.ResponseInput = options.messages.map(
+      (message) => this.formatMessageForInput(message),
     );
-    const baseParams: { model: string; input: OpenAI.Responses.ResponseInput } = {
-      model: "gpt-5.1",
-      input
-    };
+    const baseParams: { model: string; input: OpenAI.Responses.ResponseInput } =
+      {
+        model: "gpt-5.1",
+        input,
+      };
     const params = options.allowSearch
       ? { ...baseParams, tools: [{ type: "web_search" as const }] }
       : baseParams;
@@ -46,8 +58,10 @@ export class OpenAIClient {
       this.client.responses.create(params),
       (error) => {
         this.logger.error({ err: error }, "OpenAI chat failed");
-        return Errors.openai(error instanceof Error ? error.message : "Unknown OpenAI error");
-      }
+        return Errors.openai(
+          error instanceof Error ? error.message : "Unknown OpenAI error",
+        );
+      },
     ).andThen((response) => {
       const text = this.extractText(response);
       if (!text) {
@@ -64,14 +78,14 @@ export class OpenAIClient {
     schemaDescription?: string;
     allowSearch?: boolean;
   }) {
-    const input: OpenAI.Responses.ResponseInput = options.messages.map((message) =>
-      this.formatMessageForInput(message)
+    const input: OpenAI.Responses.ResponseInput = options.messages.map(
+      (message) => this.formatMessageForInput(message),
     );
     const format: OpenAI.Responses.ResponseFormatTextJSONSchemaConfig = {
       type: "json_schema",
       name: options.schemaName,
       schema: options.schema,
-      strict: true
+      strict: true,
     };
     if (options.schemaDescription !== undefined) {
       format.description = options.schemaDescription;
@@ -83,7 +97,7 @@ export class OpenAIClient {
     } = {
       model: "gpt-5.1",
       input,
-      text: { format }
+      text: { format },
     };
     const params = options.allowSearch
       ? { ...baseParams, tools: [{ type: "web_search" as const }] }
@@ -92,12 +106,16 @@ export class OpenAIClient {
       this.client.responses.parse(params),
       (error) => {
         this.logger.error({ err: error }, "OpenAI structured chat failed");
-        return Errors.openai(error instanceof Error ? error.message : "Unknown OpenAI error");
-      }
+        return Errors.openai(
+          error instanceof Error ? error.message : "Unknown OpenAI error",
+        );
+      },
     ).andThen((response) => {
       const parsedData = response.output_parsed as T | null;
       if (parsedData === null) {
-        return err<never, BotError>(Errors.openai("OpenAI returned no structured data"));
+        return err<never, BotError>(
+          Errors.openai("OpenAI returned no structured data"),
+        );
       }
       return ok(parsedData);
     });
@@ -110,16 +128,20 @@ export class OpenAIClient {
         prompt: options.prompt,
         size: "1024x1024",
         quality: "high",
-        response_format: "b64_json"
+        response_format: "b64_json",
       }),
       (error) => {
         this.logger.error({ err: error }, "OpenAI image failed");
-        return Errors.openai(error instanceof Error ? error.message : "Unknown OpenAI error");
-      }
+        return Errors.openai(
+          error instanceof Error ? error.message : "Unknown OpenAI error",
+        );
+      },
     ).andThen((response) => {
       const imageData = response.data![0]!.b64_json;
       if (!imageData) {
-        return err<never, BotError>(Errors.openai("Image generation returned no data"));
+        return err<never, BotError>(
+          Errors.openai("Image generation returned no data"),
+        );
       }
       const buffer = Buffer.from(imageData, "base64");
       return ok({ buffer, prompt: options.prompt });
@@ -143,5 +165,4 @@ export class OpenAIClient {
     }
     return null;
   }
-
 }

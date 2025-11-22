@@ -13,5 +13,5 @@ export const Errors = {
   },
   scheduler(message: string): BotError {
     return { type: "scheduler", message };
-  }
+  },
 };

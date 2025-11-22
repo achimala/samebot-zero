@@ -11,7 +11,7 @@ const ConfigSchema = z.object({
   IMAGE_OF_DAY_CHANNEL_ID: z.string().optional(),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
-    .optional()
+    .optional(),
 });
 
 export type AppConfig = {
@@ -26,7 +26,9 @@ export type AppConfig = {
 export function loadConfig(): AppConfig {
   const parsed = ConfigSchema.safeParse(process.env);
   if (!parsed.success) {
-    const formatted = parsed.error.issues.map((err: z.ZodIssue) => `${err.path.join(".")}: ${err.message}`).join("\n");
+    const formatted = parsed.error.issues
+      .map((err: z.ZodIssue) => `${err.path.join(".")}: ${err.message}`)
+      .join("\n");
     throw new Error(`Invalid configuration:\n${formatted}`);
   }
 
@@ -37,6 +39,6 @@ export function loadConfig(): AppConfig {
     openAIApiKey: env.OPENAI_API_KEY,
     mainChannelId: env.MAIN_CHANNEL_ID,
     imageOfDayChannelId: env.IMAGE_OF_DAY_CHANNEL_ID ?? env.MAIN_CHANNEL_ID,
-    logLevel: env.LOG_LEVEL ?? "info"
+    logLevel: env.LOG_LEVEL ?? "info",
   };
 }

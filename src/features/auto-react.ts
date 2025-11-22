@@ -23,9 +23,12 @@ Messages: "${message.author.displayName || message.author.username}: ${message.c
 Respond with emojis separated by spaces only.`;
     const result = await this.ctx.openai.chat({
       messages: [
-        { role: "system", content: "Respond only with emojis separated by spaces." },
-        { role: "user", content: prompt }
-      ]
+        {
+          role: "system",
+          content: "Respond only with emojis separated by spaces.",
+        },
+        { role: "user", content: prompt },
+      ],
     });
     await result.match(
       async (text) => {
@@ -44,7 +47,7 @@ Respond with emojis separated by spaces only.`;
       },
       async () => {
         /* ignore errors */
-      }
+      },
     );
   }
 }
