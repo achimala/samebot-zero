@@ -84,15 +84,11 @@ export class OpenAIClient {
     const input: OpenAI.Responses.ResponseInput = options.messages.map(
       (message) => this.formatMessageForInput(message),
     );
-    const baseParams: {
-      model: string;
-      input: OpenAI.Responses.ResponseInput;
-      maxTokens?: number;
-    } = {
-      model: "gpt-5.1",
-      input,
-      maxTokens: 50,
-    };
+    const baseParams: { model: string; input: OpenAI.Responses.ResponseInput } =
+      {
+        model: "gpt-5.1",
+        input,
+      };
     const params = options.allowSearch
       ? { ...baseParams, tools: [{ type: "web_search" as const }] }
       : baseParams;
