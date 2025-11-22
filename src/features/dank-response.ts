@@ -24,17 +24,10 @@ export class DankResponseFeature implements Feature {
     const conversationContext = this.ctx.conversation?.getContext(
       message.channelId,
     );
-    const recentHistory = conversationContext?.history.slice(-6) ?? [];
 
-    const contextText =
-      recentHistory.length > 0
-        ? recentHistory
-            .map(
-              (msg) =>
-                `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}`,
-            )
-            .join("\n")
-        : "No recent conversation context.";
+    const contextText = conversationContext
+      ? this.ctx.conversation.formatContext(conversationContext)
+      : "No recent conversation context.";
 
     const response = await this.ctx.openai.chat({
       messages: [

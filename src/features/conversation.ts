@@ -39,6 +39,27 @@ export class ConversationFeature implements Feature {
     };
   }
 
+  formatContext(context: ConversationContext): string {
+    return this.responseDecision.buildConversationContext(context);
+  }
+
+  getAllContexts(): Array<{ channelId: string; context: ConversationContext }> {
+    const results: Array<{ channelId: string; context: ConversationContext }> =
+      [];
+    for (const [channelId, state] of this.contexts.entries()) {
+      if (state.history.length > 0) {
+        results.push({
+          channelId,
+          context: {
+            history: state.history,
+            isDm: state.isDm,
+          },
+        });
+      }
+    }
+    return results;
+  }
+
   register(context: RuntimeContext): void {
     this.ctx = context;
     this.responseDecision = new ResponseDecision({
@@ -52,6 +73,7 @@ export class ConversationFeature implements Feature {
         botUserId: client.user.id,
         logger: context.logger,
       });
+      void this.handleStartup();
     });
     context.discord.on("messageCreate", (message) => {
       void this.handleMessage(message);
@@ -294,6 +316,113 @@ export class ConversationFeature implements Feature {
       content: content.trim() || "(silent)",
       images,
     };
+  }
+
+  private async handleStartup() {
+    const channels = this.ctx.discord.channels.cache.filter(
+      (channel) => channel.isTextBased() && !channel.isDMBased(),
+    );
+
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
+    for (const channel of channels.values()) {
+      if (!channel.isTextBased()) {
+        continue;
+      }
+
+      try {
+        const messages = await channel.messages.fetch({ limit: 10 });
+        if (messages.size === 0) {
+          continue;
+        }
+
+        const mostRecentMessage = Array.from(messages.values())[0];
+        if (mostRecentMessage.createdTimestamp < oneDayAgo) {
+          continue;
+        }
+
+        const key = channel.id;
+        let context = this.contexts.get(key) ?? {
+          history: [],
+          isDm: false,
+        };
+
+        const newMessages: Array<{
+          role: "user" | "assistant";
+          content: string;
+          timestamp: number;
+        }> = [];
+
+        for (const msg of messages.values()) {
+          if (msg.author.bot || msg.system) {
+            if (msg.author.id === this.botUserId) {
+              newMessages.push({
+                role: "assistant",
+                content: msg.content || "(silent)",
+                timestamp: msg.createdTimestamp,
+              });
+            }
+            continue;
+          }
+
+          const enriched = await this.enrichContent(msg);
+          const formatted = `${
+            msg.author.displayName || msg.author.username
+          }: ${enriched.content}`;
+          newMessages.push({
+            role: "user",
+            content: formatted,
+            timestamp: msg.createdTimestamp,
+          });
+        }
+
+        if (newMessages.length > 0) {
+          context.history.push(...newMessages);
+          context.history.sort((a, b) => a.timestamp - b.timestamp);
+          context.history = context.history.slice(-6);
+          this.contexts.set(key, context);
+
+          const contextText = this.formatContext(context);
+          const startupMessage = await this.ctx.openai.chat({
+            messages: [
+              {
+                role: "system",
+                content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
+              },
+              {
+                role: "user",
+                content: `Recent conversation context:\n${contextText}\n\nGenerate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.`,
+              },
+            ],
+          });
+
+          await startupMessage.match(
+            async (message) => {
+              await this.ctx.messenger.sendToChannel(channel.id, message).match(
+                async () => undefined,
+                async (error) => {
+                  this.ctx.logger.warn(
+                    { err: error, channelId: channel.id },
+                    "Failed to send startup message",
+                  );
+                },
+              );
+            },
+            async (error) => {
+              this.ctx.logger.warn(
+                { err: error, channelId: channel.id },
+                "Failed to generate startup message",
+              );
+            },
+          );
+        }
+      } catch (error) {
+        this.ctx.logger.warn(
+          { err: error, channelId: channel.id },
+          "Failed to process channel for startup message",
+        );
+      }
+    }
   }
 
   private async handleDebug(interaction: ChatInputCommandInteraction) {
