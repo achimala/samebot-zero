@@ -69,7 +69,7 @@ export class ConversationFeature implements Feature {
 
     await this.backfillMessages(message.channelId, context, message.id);
 
-    const enriched = this.enrichContent(message);
+    const enriched = await this.enrichContent(message);
     const formatted = `${
       message.author.displayName || message.author.username
     }: ${enriched.content}`;
@@ -184,7 +184,7 @@ export class ConversationFeature implements Feature {
           continue;
         }
 
-        const enriched = this.enrichContent(msg);
+        const enriched = await this.enrichContent(msg);
         const formatted = `${
           msg.author.displayName || msg.author.username
         }: ${enriched.content}`;
@@ -209,10 +209,10 @@ export class ConversationFeature implements Feature {
     }
   }
 
-  private enrichContent(message: Message): {
+  private async enrichContent(message: Message): Promise<{
     content: string;
     images: string[];
-  } {
+  }> {
     let content = message.content || "";
 
     for (const user of message.mentions.users.values()) {
@@ -254,7 +254,25 @@ export class ConversationFeature implements Feature {
         (attachment) => attachment.contentType?.startsWith("image"),
       );
       for (const attachment of imageAttachments) {
-        images.push(attachment.url);
+        try {
+          const response = await fetch(attachment.url);
+          if (!response.ok) {
+            this.ctx.logger.warn(
+              { url: attachment.url, status: response.status },
+              "Failed to fetch image",
+            );
+            continue;
+          }
+          const buffer = await response.arrayBuffer();
+          const base64 = Buffer.from(buffer).toString("base64");
+          const mimeType = attachment.contentType || "image/jpeg";
+          images.push(`data:${mimeType};base64,${base64}`);
+        } catch (error) {
+          this.ctx.logger.error(
+            { err: error, url: attachment.url },
+            "Failed to convert image to base64",
+          );
+        }
       }
     }
 
