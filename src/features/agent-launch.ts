@@ -205,9 +205,8 @@ export class AgentLaunchFeature implements Feature {
         }
         if (
           status.status === "FINISHED" &&
-          status.target.autoCreatePr &&
-          !status.target.prUrl &&
-          attempts < 10
+          !prUrl &&
+          attempts < 30
         ) {
           attempts++;
           continue;
