@@ -1,4 +1,5 @@
 import type { Message } from "discord.js";
+import type { Logger } from "pino";
 import type { ChatMessage } from "../openai/client";
 import type { OpenAIClient } from "../openai/client";
 
@@ -14,6 +15,7 @@ export interface ConversationContext {
 export interface ResponseDecisionOptions {
   openai: OpenAIClient;
   botUserId?: string;
+  logger?: Logger;
 }
 
 export class ResponseDecision {
@@ -24,20 +26,32 @@ export class ResponseDecision {
     context: ConversationContext,
   ): Promise<boolean> {
     if (context.isDm) {
+      this.options.logger?.debug("Responding: message is a DM");
       return true;
     }
     if (!message.inGuild()) {
+      this.options.logger?.debug("Responding: message is not in a guild");
       return true;
     }
     const content = message.content.toLowerCase();
     if (content.includes("samebot")) {
+      this.options.logger?.debug("Responding: message contains 'samebot'");
       return true;
     }
     if (
       this.options.botUserId &&
       message.mentions.users.has(this.options.botUserId)
     ) {
+      this.options.logger?.debug("Responding: bot is mentioned");
       return true;
+    }
+
+    const previousMessage = context.history[context.history.length - 2];
+    if (!previousMessage || previousMessage.role !== "assistant") {
+      this.options.logger?.debug(
+        "Not responding: previous message in history is not from samebot",
+      );
+      return false;
     }
 
     const conversationContext = this.buildConversationContext(context);
@@ -45,6 +59,7 @@ export class ResponseDecision {
     const decision = await this.options.openai.chatStructured<{
       shouldRespond: boolean;
     }>({
+      model: "gpt-5-mini",
       messages: [
         {
           role: "system",
@@ -84,8 +99,18 @@ Return false when in doubt.`,
     });
 
     return decision.match(
-      (result) => result.shouldRespond,
-      () => false,
+      (result) => {
+        if (result.shouldRespond) {
+          this.options.logger?.debug("Responding: AI determined response is appropriate");
+        } else {
+          this.options.logger?.debug("Not responding: AI determined response is not appropriate");
+        }
+        return result.shouldRespond;
+      },
+      () => {
+        this.options.logger?.debug("Not responding: AI decision failed");
+        return false;
+      },
     );
   }
 

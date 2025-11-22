@@ -74,6 +74,14 @@ export class OpenAIClient {
     const params = options.allowSearch
       ? { ...baseParams, tools: [{ type: "web_search" as const }] }
       : baseParams;
+    this.logger.debug(
+      {
+        model: params.model,
+        messages: options.messages,
+        allowSearch: options.allowSearch,
+      },
+      "OpenAI chat input",
+    );
     return ResultAsync.fromPromise(
       this.client.responses.create(params),
       (error) => {
@@ -84,6 +92,14 @@ export class OpenAIClient {
       },
     ).andThen((response) => {
       const text = this.extractText(response);
+      this.logger.debug(
+        {
+          model: params.model,
+          response: text,
+          rawResponse: response,
+        },
+        "OpenAI chat output",
+      );
       if (!text) {
         return err<never, BotError>(Errors.openai("OpenAI returned no text"));
       }
@@ -97,6 +113,7 @@ export class OpenAIClient {
     schemaName: string;
     schemaDescription?: string;
     allowSearch?: boolean;
+    model?: string;
   }) {
     const input: OpenAI.Responses.ResponseInput = options.messages.map(
       (message) => this.formatMessageForInput(message),
@@ -110,18 +127,29 @@ export class OpenAIClient {
     if (options.schemaDescription !== undefined) {
       format.description = options.schemaDescription;
     }
+    const model = options.model ?? "gpt-5.1";
     const baseParams: {
       model: string;
       input: OpenAI.Responses.ResponseInput;
       text?: { format: OpenAI.Responses.ResponseFormatTextJSONSchemaConfig };
     } = {
-      model: "gpt-5.1",
+      model,
       input,
       text: { format },
     };
     const params = options.allowSearch
       ? { ...baseParams, tools: [{ type: "web_search" as const }] }
       : baseParams;
+    this.logger.debug(
+      {
+        model: params.model,
+        messages: options.messages,
+        schema: options.schema,
+        schemaName: options.schemaName,
+        allowSearch: options.allowSearch,
+      },
+      "OpenAI structured chat input",
+    );
     return ResultAsync.fromPromise(
       this.client.responses.parse(params),
       (error) => {
@@ -132,6 +160,14 @@ export class OpenAIClient {
       },
     ).andThen((response) => {
       const parsedData = response.output_parsed as T | null;
+      this.logger.debug(
+        {
+          model: params.model,
+          parsedData,
+          rawResponse: response,
+        },
+        "OpenAI structured chat output",
+      );
       if (parsedData === null) {
         return err<never, BotError>(
           Errors.openai("OpenAI returned no structured data"),

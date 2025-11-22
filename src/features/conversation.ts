@@ -29,12 +29,14 @@ export class ConversationFeature implements Feature {
     this.ctx = context;
     this.responseDecision = new ResponseDecision({
       openai: context.openai,
+      logger: context.logger,
     });
     context.discord.once("ready", (client) => {
       this.botUserId = client.user.id;
       this.responseDecision = new ResponseDecision({
         openai: context.openai,
         botUserId: client.user.id,
+        logger: context.logger,
       });
     });
     context.discord.on("messageCreate", (message) => {
