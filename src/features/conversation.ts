@@ -28,6 +28,17 @@ export class ConversationFeature implements Feature {
   private readonly contexts = new Map<string, ConversationState>();
   private responseDecision!: ResponseDecision;
 
+  getContext(channelId: string): ConversationContext | undefined {
+    const context = this.contexts.get(channelId);
+    if (!context) {
+      return undefined;
+    }
+    return {
+      history: context.history,
+      isDm: context.isDm,
+    };
+  }
+
   register(context: RuntimeContext): void {
     this.ctx = context;
     this.responseDecision = new ResponseDecision({

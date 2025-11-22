@@ -21,16 +21,31 @@ export class DankResponseFeature implements Feature {
       return;
     }
 
+    const conversationContext = this.ctx.conversation?.getContext(
+      message.channelId,
+    );
+    const recentHistory = conversationContext?.history.slice(-6) ?? [];
+
+    const contextText =
+      recentHistory.length > 0
+        ? recentHistory
+            .map(
+              (msg) =>
+                `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}`,
+            )
+            .join("\n")
+        : "No recent conversation context.";
+
     const response = await this.ctx.openai.chat({
       messages: [
         {
           role: "system",
           content:
-            "Generate a single creative portmanteau or variation of the word 'dank'. Examples: dankalicious, danktacular, danktastic. Respond with only the word, nothing else.",
+            "Generate a single creative portmanteau or variation of the word 'dank' that is contextually relevant to the recent conversation. Use the conversation context to make your variation more specific and less repetitive. Examples: dankalicious, danktacular, danktastic. Respond with only the word, nothing else.",
         },
         {
           role: "user",
-          content: "Generate a variation of 'dank'",
+          content: `Recent conversation context:\n${contextText}\n\nGenerate a contextually relevant variation of 'dank' based on this conversation.`,
         },
       ],
     });
