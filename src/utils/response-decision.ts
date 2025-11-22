@@ -5,6 +5,7 @@ import type { OpenAIClient } from "../openai/client";
 
 export interface TimestampedMessage extends ChatMessage {
   timestamp: number;
+  messageId?: string;
 }
 
 export interface ConversationContext {

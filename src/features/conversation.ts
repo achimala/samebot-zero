@@ -22,6 +22,27 @@ interface ConversationState extends ConversationContext {
   lastResponseAt?: number;
 }
 
+interface MessageReference {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  author?: string;
+}
+
+interface BotAction {
+  type: "send_message" | "react" | "generate_image";
+  messageId?: string;
+  content?: string;
+  emoji?: string;
+  prompt?: string;
+  aspectRatio?: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9";
+  imageSize?: "1K" | "2K" | "4K";
+}
+
+interface BotActions {
+  actions: BotAction[];
+}
+
 export class ConversationFeature implements Feature {
   private ctx!: RuntimeContext;
   private botUserId?: string;
@@ -41,6 +62,43 @@ export class ConversationFeature implements Feature {
 
   formatContext(context: ConversationContext): string {
     return this.responseDecision.buildConversationContext(context);
+  }
+
+  formatContextWithIds(context: ConversationContext): {
+    text: string;
+    references: MessageReference[];
+  } {
+    const now = Date.now();
+    const lines: string[] = [];
+    const references: MessageReference[] = [];
+
+    for (const message of context.history) {
+      const messageId = message.messageId || `msg_${message.timestamp}`;
+      const timeAgo = Math.round((now - message.timestamp) / 1000);
+      const timeAgoText =
+        timeAgo < 60
+          ? `${timeAgo}s ago`
+          : timeAgo < 3600
+            ? `${Math.round(timeAgo / 60)}m ago`
+            : `${Math.round(timeAgo / 3600)}h ago`;
+      
+      const authorMatch = message.content.match(/^([^:]+): (.+)$/);
+      const author = authorMatch ? authorMatch[1] : undefined;
+      const content = authorMatch ? authorMatch[2] : message.content;
+      
+      lines.push(`[${timeAgoText}] [${messageId}] ${message.role}: ${message.content}`);
+      references.push({
+        id: messageId,
+        role: message.role,
+        content,
+        author,
+      });
+    }
+
+    return {
+      text: lines.join("\n"),
+      references,
+    };
   }
 
   getAllContexts(): Array<{ channelId: string; context: ConversationContext }> {
@@ -113,6 +171,7 @@ export class ConversationFeature implements Feature {
       content: formatted,
       images: enriched.images.length > 0 ? enriched.images : undefined,
       timestamp: message.createdTimestamp,
+      messageId: message.id,
     });
     context.history = context.history.slice(-12);
     this.contexts.set(key, context);
@@ -122,36 +181,163 @@ export class ConversationFeature implements Feature {
     }
 
     await (message.channel as { sendTyping: () => Promise<void> }).sendTyping();
+    
+    const contextWithIds = this.formatContextWithIds(context);
+    const emojiList = this.buildEmojiList();
+    const emojiContext =
+      emojiList.length > 0
+        ? `\n\nAvailable custom emoji: ${emojiList}\nYou can use either standard Unicode emoji or custom emoji names/format.`
+        : "";
+
     const messages: ChatMessage[] = [
       {
         role: "system",
-        content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
+        content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
+
+You can perform multiple actions:
+- send_message: Send a text message to the channel
+- react: React to a message by referencing its message ID
+- generate_image: Generate an image with a prompt
+
+Message references in context:
+${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}`,
       },
-      ...context.history.map(({ timestamp, ...msg }) => msg),
+      {
+        role: "user",
+        content: `Recent conversation:\n${contextWithIds.text}\n\nWhat actions should you take?`,
+      },
     ];
 
-    const response = await this.ctx.openai.chat({
+    const response = await this.ctx.openai.chatStructured<BotActions>({
       messages,
       allowSearch: true,
+      schema: {
+        type: "object",
+        properties: {
+          actions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                type: {
+                  type: "string",
+                  enum: ["send_message", "react", "generate_image"],
+                  description: "The type of action to perform",
+                },
+                messageId: {
+                  type: "string",
+                  description: "Message ID to react to (required for react action)",
+                },
+                content: {
+                  type: "string",
+                  description: "Message content (required for send_message action)",
+                },
+                emoji: {
+                  type: "string",
+                  description: "Emoji to react with (required for react action). Can be Unicode emoji or custom emoji name/format.",
+                },
+                prompt: {
+                  type: "string",
+                  description: "Image generation prompt (required for generate_image action)",
+                },
+                aspectRatio: {
+                  type: "string",
+                  enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"],
+                  description: "Aspect ratio for image generation (optional, defaults to 1:1)",
+                },
+                imageSize: {
+                  type: "string",
+                  enum: ["1K", "2K", "4K"],
+                  description: "Image size for image generation (optional, defaults to 1K)",
+                },
+              },
+              required: ["type"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["actions"],
+        additionalProperties: false,
+      },
+      schemaName: "botActions",
+      schemaDescription: "List of actions for the bot to perform",
     });
+
     await response.match(
-      async (reply) => {
-        context.history.push({
-          role: "assistant",
-          content: reply,
-          timestamp: Date.now(),
-        });
+      async (actions) => {
+        const messageIdMap = new Map<string, Message>();
+        for (const ref of contextWithIds.references) {
+          const matchingMessage = await this.findMessageById(
+            message.channelId,
+            ref.id,
+          );
+          if (matchingMessage) {
+            messageIdMap.set(ref.id, matchingMessage);
+          }
+        }
+        messageIdMap.set(message.id, message);
+
+        for (const action of actions.actions) {
+          if (action.type === "send_message" && action.content) {
+            const channel = await this.ctx.discord.channels.fetch(message.channelId);
+            if (channel && channel.isTextBased()) {
+              try {
+                const sentMessage = await channel.send(action.content);
+                context.history.push({
+                  role: "assistant",
+                  content: action.content,
+                  timestamp: Date.now(),
+                  messageId: sentMessage.id,
+                });
+              } catch (sendError) {
+                this.ctx.logger.error(
+                  { err: sendError },
+                  "Failed to deliver message",
+                );
+              }
+            }
+          } else if (action.type === "react" && action.messageId && action.emoji) {
+            const targetMessage = messageIdMap.get(action.messageId) || message;
+            const emoji = this.resolveEmoji(action.emoji);
+            if (emoji) {
+              try {
+                await targetMessage.react(emoji);
+              } catch (error) {
+                this.ctx.logger.warn({ err: error, emoji }, "Failed to react");
+              }
+            }
+          } else if (action.type === "generate_image" && action.prompt) {
+            const imageResult = await this.ctx.openai.generateImage({
+              prompt: action.prompt,
+              aspectRatio: action.aspectRatio,
+              imageSize: action.imageSize,
+            });
+            await imageResult.match(
+              async ({ buffer }) => {
+                await this.ctx.messenger.sendBuffer(
+                  message.channelId,
+                  buffer,
+                  "samebot-image.png",
+                  action.prompt,
+                ).match(
+                  async () => undefined,
+                  async (sendError: BotError) => {
+                    this.ctx.logger.error(
+                      { err: sendError },
+                      "Failed to send image",
+                    );
+                  },
+                );
+              },
+              async (error) => {
+                this.ctx.logger.error({ err: error }, "Image generation failed");
+              },
+            );
+          }
+        }
+
         context.history = context.history.slice(-12);
         context.lastResponseAt = Date.now();
-        await this.ctx.messenger.sendToChannel(message.channelId, reply).match(
-          async () => undefined,
-          async (sendError: BotError) => {
-            this.ctx.logger.error(
-              { err: sendError },
-              "Failed to deliver reply",
-            );
-          },
-        );
       },
       async (error) => {
         this.ctx.logger.error(
@@ -210,6 +396,7 @@ export class ConversationFeature implements Feature {
               role: "assistant",
               content,
               timestamp: msg.createdTimestamp,
+              messageId: msg.id,
             });
           }
           continue;
@@ -229,6 +416,7 @@ export class ConversationFeature implements Feature {
           content: formatted,
           images: enriched.images.length > 0 ? enriched.images : undefined,
           timestamp: msg.createdTimestamp,
+          messageId: msg.id,
         });
       }
 
@@ -318,110 +506,157 @@ export class ConversationFeature implements Feature {
     };
   }
 
+  private buildEmojiList(): string {
+    const emojiList: string[] = [];
+    for (const emoji of this.ctx.customEmoji.values()) {
+      const format = emoji.animated
+        ? `<a:${emoji.name}:${emoji.id}>`
+        : `<:${emoji.name}:${emoji.id}>`;
+      emojiList.push(`${emoji.name} (${format})`);
+    }
+    return emojiList.join(", ");
+  }
+
+  private resolveEmoji(emojiString: string): string | null {
+    const trimmed = emojiString.trim();
+    if (trimmed.startsWith("<") && trimmed.endsWith(">")) {
+      return trimmed;
+    }
+    const customEmoji = this.ctx.customEmoji.get(trimmed);
+    if (customEmoji) {
+      return customEmoji.animated
+        ? `<a:${customEmoji.name}:${customEmoji.id}>`
+        : `<:${customEmoji.name}:${customEmoji.id}>`;
+    }
+    return trimmed;
+  }
+
+  private async findMessageById(
+    channelId: string,
+    messageId: string,
+  ): Promise<Message | null> {
+    try {
+      const channel =
+        this.ctx.discord.channels.cache.get(channelId) ||
+        (await this.ctx.discord.channels.fetch(channelId));
+      if (!channel || !channel.isTextBased()) {
+        return null;
+      }
+      const msg = await channel.messages.fetch(messageId);
+      return msg;
+    } catch (error) {
+      this.ctx.logger.warn(
+        { err: error, channelId, messageId },
+        "Failed to find message by ID",
+      );
+    }
+    return null;
+  }
+
   private async handleStartup() {
-    const channels = this.ctx.discord.channels.cache.filter(
-      (channel) => channel.isTextBased() && !channel.isDMBased(),
-    );
+    const mainChannelId = this.ctx.config.mainChannelId;
+    const channel = this.ctx.discord.channels.cache.get(mainChannelId) ||
+      (await this.ctx.discord.channels.fetch(mainChannelId));
+
+    if (!channel || !channel.isTextBased() || channel.isDMBased()) {
+      return;
+    }
 
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
 
-    for (const channel of channels.values()) {
-      if (!channel.isTextBased()) {
-        continue;
+    try {
+      const messages = await channel.messages.fetch({ limit: 10 });
+      if (messages.size === 0) {
+        return;
       }
 
-      try {
-        const messages = await channel.messages.fetch({ limit: 10 });
-        if (messages.size === 0) {
-          continue;
-        }
+      const mostRecentMessage = Array.from(messages.values())[0];
+      if (mostRecentMessage.createdTimestamp < oneDayAgo) {
+        return;
+      }
 
-        const mostRecentMessage = Array.from(messages.values())[0];
-        if (mostRecentMessage.createdTimestamp < oneDayAgo) {
-          continue;
-        }
+      const key = channel.id;
+      let context = this.contexts.get(key) ?? {
+        history: [],
+        isDm: false,
+      };
 
-        const key = channel.id;
-        let context = this.contexts.get(key) ?? {
-          history: [],
-          isDm: false,
-        };
+      const newMessages: Array<{
+        role: "user" | "assistant";
+        content: string;
+        timestamp: number;
+      }> = [];
 
-        const newMessages: Array<{
-          role: "user" | "assistant";
-          content: string;
-          timestamp: number;
-        }> = [];
-
-        for (const msg of messages.values()) {
-          if (msg.author.bot || msg.system) {
-            if (msg.author.id === this.botUserId) {
-              newMessages.push({
-                role: "assistant",
-                content: msg.content || "(silent)",
-                timestamp: msg.createdTimestamp,
-              });
-            }
-            continue;
+      for (const msg of messages.values()) {
+        if (msg.author.bot || msg.system) {
+          if (msg.author.id === this.botUserId) {
+            newMessages.push({
+              role: "assistant",
+              content: msg.content || "(silent)",
+              timestamp: msg.createdTimestamp,
+              messageId: msg.id,
+            });
           }
-
-          const enriched = await this.enrichContent(msg);
-          const formatted = `${
-            msg.author.displayName || msg.author.username
-          }: ${enriched.content}`;
-          newMessages.push({
-            role: "user",
-            content: formatted,
-            timestamp: msg.createdTimestamp,
-          });
+          continue;
         }
 
-        if (newMessages.length > 0) {
-          context.history.push(...newMessages);
-          context.history.sort((a, b) => a.timestamp - b.timestamp);
-          context.history = context.history.slice(-6);
-          this.contexts.set(key, context);
+        const enriched = await this.enrichContent(msg);
+        const formatted = `${
+          msg.author.displayName || msg.author.username
+        }: ${enriched.content}`;
+        newMessages.push({
+          role: "user",
+          content: formatted,
+          timestamp: msg.createdTimestamp,
+          messageId: msg.id,
+        });
+      }
 
-          const contextText = this.formatContext(context);
-          const startupMessage = await this.ctx.openai.chat({
-            messages: [
-              {
-                role: "system",
-                content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
-              },
-              {
-                role: "user",
-                content: `Recent conversation context:\n${contextText}\n\nGenerate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.`,
-              },
-            ],
-          });
+      if (newMessages.length > 0) {
+        context.history.push(...newMessages);
+        context.history.sort((a, b) => a.timestamp - b.timestamp);
+        context.history = context.history.slice(-6);
+        this.contexts.set(key, context);
 
-          await startupMessage.match(
-            async (message) => {
-              await this.ctx.messenger.sendToChannel(channel.id, message).match(
-                async () => undefined,
-                async (error) => {
-                  this.ctx.logger.warn(
-                    { err: error, channelId: channel.id },
-                    "Failed to send startup message",
-                  );
-                },
-              );
+        const contextText = this.formatContext(context);
+        const startupMessage = await this.ctx.openai.chat({
+          messages: [
+            {
+              role: "system",
+              content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
             },
-            async (error) => {
-              this.ctx.logger.warn(
-                { err: error, channelId: channel.id },
-                "Failed to generate startup message",
-              );
+            {
+              role: "user",
+              content: `Recent conversation context:\n${contextText}\n\nGenerate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.`,
             },
-          );
-        }
-      } catch (error) {
-        this.ctx.logger.warn(
-          { err: error, channelId: channel.id },
-          "Failed to process channel for startup message",
+          ],
+        });
+
+        await startupMessage.match(
+          async (message) => {
+            await this.ctx.messenger.sendToChannel(channel.id, message).match(
+              async () => undefined,
+              async (error) => {
+                this.ctx.logger.warn(
+                  { err: error, channelId: channel.id },
+                  "Failed to send startup message",
+                );
+              },
+            );
+          },
+          async (error) => {
+            this.ctx.logger.warn(
+              { err: error, channelId: channel.id },
+              "Failed to generate startup message",
+            );
+          },
         );
       }
+    } catch (error) {
+      this.ctx.logger.warn(
+        { err: error, channelId: channel.id },
+        "Failed to process channel for startup message",
+      );
     }
   }
 
