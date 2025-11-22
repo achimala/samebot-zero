@@ -1,25 +1,6 @@
 import type { Message } from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 
-const DANK_VARIATIONS = [
-  "dankalicious",
-  "danktacular",
-  "danktastic",
-  "dankulous",
-  "dankified",
-  "danktasticular",
-  "dankaliciously",
-  "danktacularly",
-  "danktastically",
-  "dankulousness",
-  "dankification",
-  "danktasticularity",
-  "dankaliciousness",
-  "danktacularity",
-  "danktasticity",
-  "dankulousity",
-];
-
 export class DankResponseFeature implements Feature {
   private ctx!: RuntimeContext;
 
@@ -40,13 +21,39 @@ export class DankResponseFeature implements Feature {
       return;
     }
 
-    const variation =
-      DANK_VARIATIONS[Math.floor(Math.random() * DANK_VARIATIONS.length)];
+    const response = await this.ctx.openai.chat({
+      messages: [
+        {
+          role: "system",
+          content:
+            "Generate a single creative portmanteau or variation of the word 'dank'. Examples: dankalicious, danktacular, danktastic. Respond with only the word, nothing else.",
+        },
+        {
+          role: "user",
+          content: "Generate a variation of 'dank'",
+        },
+      ],
+    });
 
-    await this.ctx.messenger.sendToChannel(message.channelId, variation).match(
-      async () => undefined,
+    await response.match(
+      async (variation) => {
+        await this.ctx.messenger
+          .sendToChannel(message.channelId, variation.trim())
+          .match(
+            async () => undefined,
+            async (error) => {
+              this.ctx.logger.warn(
+                { err: error },
+                "Failed to send dank response",
+              );
+            },
+          );
+      },
       async (error) => {
-        this.ctx.logger.warn({ err: error }, "Failed to send dank response");
+        this.ctx.logger.warn(
+          { err: error },
+          "Failed to generate dank variation",
+        );
       },
     );
   }
