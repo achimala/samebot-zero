@@ -16,11 +16,25 @@ export class OpenAIClient {
     this.client = new OpenAI({ apiKey: config.openAIApiKey });
   }
 
-  chat(options: { messages: ChatMessage[]; allowSearch?: boolean }) {
-    const input: OpenAI.Responses.ResponseInput = options.messages.map((message) => ({
+  private formatMessageForInput(message: ChatMessage): OpenAI.Responses.ResponseInputItem {
+    if (message.role === "assistant") {
+      return {
+        role: "assistant" as const,
+        content: [{ type: "output_text" as const, text: message.content, annotations: [] }],
+        id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        status: "completed" as const
+      };
+    }
+    return {
       role: message.role,
       content: [{ type: "input_text" as const, text: message.content }]
-    }));
+    };
+  }
+
+  chat(options: { messages: ChatMessage[]; allowSearch?: boolean }) {
+    const input: OpenAI.Responses.ResponseInput = options.messages.map((message) =>
+      this.formatMessageForInput(message)
+    );
     const baseParams: { model: string; input: OpenAI.Responses.ResponseInput } = {
       model: "gpt-5.1",
       input
@@ -50,10 +64,9 @@ export class OpenAIClient {
     schemaDescription?: string;
     allowSearch?: boolean;
   }) {
-    const input: OpenAI.Responses.ResponseInput = options.messages.map((message) => ({
-      role: message.role,
-      content: [{ type: "input_text" as const, text: message.content }]
-    }));
+    const input: OpenAI.Responses.ResponseInput = options.messages.map((message) =>
+      this.formatMessageForInput(message)
+    );
     const format: OpenAI.Responses.ResponseFormatTextJSONSchemaConfig = {
       type: "json_schema",
       name: options.schemaName,

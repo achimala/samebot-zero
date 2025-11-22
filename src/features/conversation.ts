@@ -57,7 +57,6 @@ export class ConversationFeature implements Feature {
     }
 
     await (message.channel as { sendTyping: () => Promise<void> }).sendTyping();
-    const allowSearch = this.shouldUseSearchHint(message);
     const messages: ChatMessage[] = [
       {
         role: "system",
@@ -66,7 +65,7 @@ export class ConversationFeature implements Feature {
       ...context.history
     ];
 
-    const response = await this.ctx.openai.chat({ messages, allowSearch });
+    const response = await this.ctx.openai.chat({ messages, allowSearch: true });
     await response.match(
       async (reply) => {
         context.history.push({ role: "assistant", content: reply });
@@ -109,11 +108,6 @@ export class ConversationFeature implements Feature {
       return true;
     }
     return false;
-  }
-
-  private shouldUseSearchHint(message: Message) {
-    const lower = message.content.toLowerCase();
-    return lower.includes("today") || lower.includes("tonight") || lower.includes("tomorrow") || message.content.includes("?");
   }
 
   private enrichContent(message: Message) {
