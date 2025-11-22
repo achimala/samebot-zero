@@ -57,10 +57,10 @@ export class OpenAIClient {
       });
       return {
         role: "assistant" as const,
-        content: content as OpenAI.Responses.ResponseInputItem["content"],
+        content: content,
         id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         status: "completed" as const,
-      };
+      } as OpenAI.Responses.ResponseInputItem;
     }
 
     content.push({ type: "input_text" as const, text: message.content });
@@ -76,8 +76,8 @@ export class OpenAIClient {
 
     return {
       role: message.role,
-      content: content as OpenAI.Responses.ResponseInputItem["content"],
-    };
+      content: content,
+    } as OpenAI.Responses.ResponseInputItem;
   }
 
   chat(options: { messages: ChatMessage[]; allowSearch?: boolean }) {

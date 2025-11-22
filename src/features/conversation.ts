@@ -87,12 +87,17 @@ export class ConversationFeature implements Feature {
       const content = authorMatch ? authorMatch[2] : message.content;
       
       lines.push(`[${timeAgoText}] [${messageId}] ${message.role}: ${message.content}`);
-      references.push({
-        id: messageId,
-        role: message.role,
-        content,
-        author,
-      });
+      if (message.role !== "system") {
+        const reference: MessageReference = {
+          id: messageId,
+          role: message.role,
+          content: content || "",
+        };
+        if (author !== undefined) {
+          reference.author = author;
+        }
+        references.push(reference);
+      }
     }
 
     return {
@@ -166,13 +171,22 @@ export class ConversationFeature implements Feature {
     const formatted = `${
       message.author.displayName || message.author.username
     }: ${enriched.content}`;
-    context.history.push({
+    const historyEntry: {
+      role: "user";
+      content: string;
+      timestamp: number;
+      messageId: string;
+      images?: string[];
+    } = {
       role: "user",
       content: formatted,
-      images: enriched.images.length > 0 ? enriched.images : undefined,
       timestamp: message.createdTimestamp,
       messageId: message.id,
-    });
+    };
+    if (enriched.images.length > 0) {
+      historyEntry.images = enriched.images;
+    }
+    context.history.push(historyEntry);
     context.history = context.history.slice(-12);
     this.contexts.set(key, context);
 
@@ -217,42 +231,70 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           actions: {
             type: "array",
             items: {
-              type: "object",
-              properties: {
-                type: {
-                  type: "string",
-                  enum: ["send_message", "react", "generate_image"],
-                  description: "The type of action to perform",
+              oneOf: [
+                {
+                  type: "object",
+                  properties: {
+                    type: {
+                      type: "string",
+                      enum: ["send_message"],
+                      description: "The type of action to perform",
+                    },
+                    content: {
+                      type: "string",
+                      description: "Message content",
+                    },
+                  },
+                  required: ["type", "content"],
+                  additionalProperties: false,
                 },
-                messageId: {
-                  type: "string",
-                  description: "Message ID to react to (required for react action)",
+                {
+                  type: "object",
+                  properties: {
+                    type: {
+                      type: "string",
+                      enum: ["react"],
+                      description: "The type of action to perform",
+                    },
+                    messageId: {
+                      type: "string",
+                      description: "Message ID to react to",
+                    },
+                    emoji: {
+                      type: "string",
+                      description: "Emoji to react with. Can be Unicode emoji or custom emoji name/format.",
+                    },
+                  },
+                  required: ["type", "messageId", "emoji"],
+                  additionalProperties: false,
                 },
-                content: {
-                  type: "string",
-                  description: "Message content (required for send_message action)",
+                {
+                  type: "object",
+                  properties: {
+                    type: {
+                      type: "string",
+                      enum: ["generate_image"],
+                      description: "The type of action to perform",
+                    },
+                    prompt: {
+                      type: "string",
+                      description: "Image generation prompt",
+                    },
+                    aspectRatio: {
+                      type: "string",
+                      enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"],
+                      description: "Aspect ratio for image generation (optional, defaults to 1:1)",
+                    },
+                    imageSize: {
+                      type: "string",
+                      enum: ["1K", "2K", "4K"],
+                      description: "Image size for image generation (optional, defaults to 1K)",
+                    },
+                  },
+                  required: ["type", "prompt"],
+                  additionalProperties: false,
                 },
-                emoji: {
-                  type: "string",
-                  description: "Emoji to react with (required for react action). Can be Unicode emoji or custom emoji name/format.",
-                },
-                prompt: {
-                  type: "string",
-                  description: "Image generation prompt (required for generate_image action)",
-                },
-                aspectRatio: {
-                  type: "string",
-                  enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"],
-                  description: "Aspect ratio for image generation (optional, defaults to 1:1)",
-                },
-                imageSize: {
-                  type: "string",
-                  enum: ["1K", "2K", "4K"],
-                  description: "Image size for image generation (optional, defaults to 1K)",
-                },
-              },
-              required: ["type"],
-              additionalProperties: false,
+              ],
             },
           },
         },
@@ -280,7 +322,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         for (const action of actions.actions) {
           if (action.type === "send_message" && action.content) {
             const channel = await this.ctx.discord.channels.fetch(message.channelId);
-            if (channel && channel.isTextBased()) {
+            if (channel && channel.isTextBased() && "send" in channel) {
               try {
                 const sentMessage = await channel.send(action.content);
                 context.history.push({
@@ -307,11 +349,20 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
               }
             }
           } else if (action.type === "generate_image" && action.prompt) {
-            const imageResult = await this.ctx.openai.generateImage({
+            const imageOptions: {
+              prompt: string;
+              aspectRatio?: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9";
+              imageSize?: "1K" | "2K" | "4K";
+            } = {
               prompt: action.prompt,
-              aspectRatio: action.aspectRatio,
-              imageSize: action.imageSize,
-            });
+            };
+            if (action.aspectRatio !== undefined) {
+              imageOptions.aspectRatio = action.aspectRatio;
+            }
+            if (action.imageSize !== undefined) {
+              imageOptions.imageSize = action.imageSize;
+            }
+            const imageResult = await this.ctx.openai.generateImage(imageOptions);
             await imageResult.match(
               async ({ buffer }) => {
                 await this.ctx.messenger.sendBuffer(
@@ -386,6 +437,8 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         role: "user" | "assistant";
         content: string;
         timestamp: number;
+        messageId: string;
+        images?: string[];
       }> = [];
 
       for (const [messageId, msg] of messages) {
@@ -411,13 +464,22 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         const formatted = `${
           msg.author.displayName || msg.author.username
         }: ${enriched.content}`;
-        newMessages.push({
+        const historyEntry: {
+          role: "user";
+          content: string;
+          timestamp: number;
+          messageId: string;
+          images?: string[];
+        } = {
           role: "user",
           content: formatted,
-          images: enriched.images.length > 0 ? enriched.images : undefined,
           timestamp: msg.createdTimestamp,
           messageId: msg.id,
-        });
+        };
+        if (enriched.images.length > 0) {
+          historyEntry.images = enriched.images;
+        }
+        newMessages.push(historyEntry);
       }
 
       if (newMessages.length > 0) {
@@ -571,7 +633,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       }
 
       const mostRecentMessage = Array.from(messages.values())[0];
-      if (mostRecentMessage.createdTimestamp < oneDayAgo) {
+      if (!mostRecentMessage || mostRecentMessage.createdTimestamp < oneDayAgo) {
         return;
       }
 
@@ -585,6 +647,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         role: "user" | "assistant";
         content: string;
         timestamp: number;
+        messageId: string;
       }> = [];
 
       for (const msg of messages.values()) {
