@@ -8,6 +8,7 @@ import { Errors, type BotError } from "../core/errors";
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
+  images?: string[];
 };
 
 const DEFAULT_IMAGE_CONFIG = {
@@ -42,23 +43,40 @@ export class OpenAIClient {
   private formatMessageForInput(
     message: ChatMessage,
   ): OpenAI.Responses.ResponseInputItem {
+    const content: Array<
+      | { type: "input_text"; text: string }
+      | { type: "input_image_url"; image_url: { url: string } }
+      | { type: "output_text"; text: string; annotations: never[] }
+    > = [];
+
     if (message.role === "assistant") {
+      content.push({
+        type: "output_text" as const,
+        text: message.content,
+        annotations: [],
+      });
       return {
         role: "assistant" as const,
-        content: [
-          {
-            type: "output_text" as const,
-            text: message.content,
-            annotations: [],
-          },
-        ],
+        content: content as OpenAI.Responses.ResponseInputItem["content"],
         id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         status: "completed" as const,
       };
     }
+
+    content.push({ type: "input_text" as const, text: message.content });
+
+    if (message.images && message.images.length > 0) {
+      for (const imageUrl of message.images) {
+        content.push({
+          type: "input_image_url" as const,
+          image_url: { url: imageUrl },
+        });
+      }
+    }
+
     return {
       role: message.role,
-      content: [{ type: "input_text" as const, text: message.content }],
+      content: content as OpenAI.Responses.ResponseInputItem["content"],
     };
   }
 

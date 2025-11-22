@@ -61,22 +61,26 @@ export class ConversationFeature implements Feature {
 
     const key = message.channelId || message.author.id;
     const isDm = !message.inGuild();
-    const context = this.contexts.get(key) ?? {
+    let context = this.contexts.get(key) ?? {
       history: [],
       isDm,
     };
     context.isDm = isDm;
-    this.contexts.set(key, context);
 
+    await this.backfillMessages(message.channelId, context, message.id);
+
+    const enriched = this.enrichContent(message);
     const formatted = `${
       message.author.displayName || message.author.username
-    }: ${this.enrichContent(message)}`;
+    }: ${enriched.content}`;
     context.history.push({
       role: "user",
       content: formatted,
+      images: enriched.images.length > 0 ? enriched.images : undefined,
       timestamp: message.createdTimestamp,
     });
     context.history = context.history.slice(-12);
+    this.contexts.set(key, context);
 
     if (!(await this.responseDecision.shouldRespond(message, context))) {
       return;
@@ -135,7 +139,80 @@ export class ConversationFeature implements Feature {
     );
   }
 
-  private enrichContent(message: Message) {
+  private async backfillMessages(
+    channelId: string,
+    context: ConversationState,
+    beforeMessageId: string,
+  ) {
+    try {
+      const channel = this.ctx.discord.channels.cache.get(channelId) ||
+        (await this.ctx.discord.channels.fetch(channelId));
+      if (!channel || !channel.isTextBased()) {
+        return;
+      }
+
+      const existingMessageIds = new Set(
+        context.history.map((msg) => msg.timestamp.toString()),
+      );
+
+      const messages = await channel.messages.fetch({
+        limit: 50,
+        before: beforeMessageId,
+      });
+
+      const newMessages: Array<{
+        role: "user" | "assistant";
+        content: string;
+        timestamp: number;
+      }> = [];
+
+      for (const [messageId, msg] of messages) {
+        if (msg.author.bot || msg.system) {
+          if (msg.author.id === this.botUserId) {
+            const content = msg.content || "(silent)";
+            newMessages.push({
+              role: "assistant",
+              content,
+              timestamp: msg.createdTimestamp,
+            });
+          }
+          continue;
+        }
+
+        const messageKey = msg.createdTimestamp.toString();
+        if (existingMessageIds.has(messageKey)) {
+          continue;
+        }
+
+        const enriched = this.enrichContent(msg);
+        const formatted = `${
+          msg.author.displayName || msg.author.username
+        }: ${enriched.content}`;
+        newMessages.push({
+          role: "user",
+          content: formatted,
+          images: enriched.images.length > 0 ? enriched.images : undefined,
+          timestamp: msg.createdTimestamp,
+        });
+      }
+
+      if (newMessages.length > 0) {
+        context.history.push(...newMessages);
+        context.history.sort((a, b) => a.timestamp - b.timestamp);
+        context.history = context.history.slice(-12);
+      }
+    } catch (error) {
+      this.ctx.logger.error(
+        { err: error, channelId },
+        "Failed to backfill messages",
+      );
+    }
+  }
+
+  private enrichContent(message: Message): {
+    content: string;
+    images: string[];
+  } {
     let content = message.content || "";
 
     for (const user of message.mentions.users.values()) {
@@ -171,15 +248,20 @@ export class ConversationFeature implements Feature {
       }
     }
 
+    const images: string[] = [];
     if (message.attachments.size > 0) {
-      const attachments = Array.from(message.attachments.values())
-        .filter((attachment) => attachment.contentType?.startsWith("image"))
-        .map((attachment) => attachment.url);
-      if (attachments.length > 0) {
-        content += `\nImages:\n${attachments.join("\n")}`;
+      const imageAttachments = Array.from(message.attachments.values()).filter(
+        (attachment) => attachment.contentType?.startsWith("image"),
+      );
+      for (const attachment of imageAttachments) {
+        images.push(attachment.url);
       }
     }
-    return content.trim() || "(silent)";
+
+    return {
+      content: content.trim() || "(silent)",
+      images,
+    };
   }
 
   private async handleDebug(interaction: ChatInputCommandInteraction) {
