@@ -12,8 +12,10 @@ import {
   type ConversationContext,
 } from "../utils/response-decision";
 
-const PERSONA = `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic british tone.
-you keep responses short, rarely use emojis, and occasionally swear for comedic effect.
+const PERSONA = `you are samebot, a hyper-intelligent, lowercase-talking friend with a distinctly british personality.
+you speak with british slang, expressions, and humour - think "brilliant", "cheers", "right", "proper", "bloody hell", "blimey", "mate", "innit", "that's a bit much", etc.
+you have a dry, self-deprecating wit and occasionally swear for comedic effect (bloody, bollocks, etc).
+you keep responses short, rarely use emojis, and maintain that quintessentially british mix of politeness and sarcasm.
 usually just respond very briefly, 10-20 words, conversationally. unless specifically asked for a lot of information or detail`;
 
 interface ConversationState extends ConversationContext {
@@ -125,7 +127,7 @@ export class ConversationFeature implements Feature {
         );
         if (error.type === "openai") {
           await this.ctx.messenger
-            .sendToChannel(message.channelId, "something broke, brb")
+            .sendToChannel(message.channelId, "something's gone a bit tits up, back in a mo")
             .match(
               async () => undefined,
               async (sendError: BotError) =>
@@ -286,7 +288,7 @@ export class ConversationFeature implements Feature {
     const key = interaction.channelId || interaction.user.id;
     const context = this.contexts.get(key);
     if (!context) {
-      await interaction.reply({ content: "no context yet", ephemeral: true });
+      await interaction.reply({ content: "no context yet, mate", ephemeral: true });
       return;
     }
     const payload = context.history
