@@ -32,7 +32,7 @@ export class ImageCommandFeature implements Feature {
       },
       async (error) => {
         this.ctx.logger.error({ err: error }, "Image generation failed");
-        await interaction.editReply("couldn't draw that, soz");
+        await interaction.editReply("couldn't draw that, sorry mate");
       },
     );
   }
