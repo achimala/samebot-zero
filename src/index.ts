@@ -4,6 +4,7 @@ import { createLogger } from "./core/logger";
 import { DiscordGateway } from "./discord/gateway";
 import { DiscordMessenger } from "./discord/messenger";
 import { OpenAIClient } from "./openai/client";
+import { SupabaseClient } from "./supabase/client";
 import type { Feature } from "./core/runtime";
 import { ConversationFeature } from "./features/conversation";
 import { AutoReactFeature } from "./features/auto-react";
@@ -18,6 +19,7 @@ async function main() {
   const gateway = new DiscordGateway(config, logger);
   const messenger = new DiscordMessenger(gateway.client, logger);
   const openai = new OpenAIClient(config, logger);
+  const supabase = new SupabaseClient(config, logger);
 
   const runtime = {
     config,
@@ -25,6 +27,7 @@ async function main() {
     discord: gateway.client,
     messenger,
     openai,
+    supabase,
   };
 
   const features: Feature[] = [
