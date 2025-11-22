@@ -45,7 +45,7 @@ export class OpenAIClient {
   ): OpenAI.Responses.ResponseInputItem {
     const content: Array<
       | { type: "input_text"; text: string }
-      | { type: "input_image"; image_url: { url: string } }
+      | { type: "input_image"; image_url: string }
       | { type: "output_text"; text: string; annotations: never[] }
     > = [];
 
@@ -69,7 +69,7 @@ export class OpenAIClient {
       for (const imageUrl of message.images) {
         content.push({
           type: "input_image" as const,
-          image_url: { url: imageUrl },
+          image_url: imageUrl,
         });
       }
     }
