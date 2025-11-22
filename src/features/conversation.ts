@@ -2,6 +2,7 @@ import type { Message, ChatInputCommandInteraction } from "discord.js";
 import { DateTime } from "luxon";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import type { ChatMessage } from "../openai/client";
+import type { BotError } from "../core/errors";
 
 const PERSONA = `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic british tone.
 you keep responses short, rarely use emojis, and occasionally swear for comedic effect.`;
@@ -55,7 +56,9 @@ export class ConversationFeature implements Feature {
       return;
     }
 
-    await message.channel.sendTyping();
+    if ("sendTyping" in message.channel && typeof message.channel.sendTyping === "function") {
+      await message.channel.sendTyping();
+    }
     const allowSearch = this.shouldUseSearchHint(message);
     const messages: ChatMessage[] = [
       {
@@ -73,7 +76,7 @@ export class ConversationFeature implements Feature {
         context.lastResponseAt = Date.now();
         await this.ctx.messenger.replyToMessage(message, reply).match(
           async () => undefined,
-          async (sendError) => {
+          async (sendError: BotError) => {
             this.ctx.logger.error({ err: sendError }, "Failed to deliver reply");
           }
         );
@@ -83,7 +86,7 @@ export class ConversationFeature implements Feature {
         if (error.type === "openai") {
           await this.ctx.messenger.replyToMessage(message, "something broke, brb").match(
             async () => undefined,
-            async (sendError) => this.ctx.logger.error({ err: sendError }, "Failed to send error message")
+            async (sendError: BotError) => this.ctx.logger.error({ err: sendError }, "Failed to send error message")
           );
         }
       }

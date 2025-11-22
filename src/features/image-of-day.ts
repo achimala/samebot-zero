@@ -1,7 +1,21 @@
 import { DateTime } from "luxon";
+import { z } from "zod";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 
 const ZONE = "America/Los_Angeles";
+
+const PromptResponseSchema = z.object({
+  prompt: z.string().optional(),
+  caption: z.string().optional()
+});
+
+const promptResponseJsonSchema = {
+  type: "object",
+  properties: {
+    prompt: { type: "string" },
+    caption: { type: "string" }
+  }
+};
 
 export class ImageOfDayFeature implements Feature {
   private ctx!: RuntimeContext;
@@ -37,7 +51,7 @@ export class ImageOfDayFeature implements Feature {
   private async runJob() {
     const today = DateTime.now().setZone(ZONE).toFormat("cccc, LLL dd");
     this.ctx.logger.info({ today }, "Running image of the day");
-    const ideation = await this.ctx.openai.chat({
+    const ideation = await this.ctx.openai.chatStructured<z.infer<typeof PromptResponseSchema>>({
       messages: [
         {
           role: "system",
@@ -47,12 +61,24 @@ export class ImageOfDayFeature implements Feature {
           role: "user",
           content: `Date: ${today}. Keep caption under 120 characters.`
         }
-      ]
+      ],
+      schema: promptResponseJsonSchema,
+      schemaName: "prompt_response",
+      schemaDescription: "A prompt and optional caption for generating a humorous meme image"
     });
 
     await ideation.match(
-      async (text) => {
-        const { prompt, caption } = parsePromptResponse(text);
+      async (data) => {
+        const validated = PromptResponseSchema.safeParse(data);
+        if (!validated.success) {
+          this.ctx.logger.error({ err: validated.error }, "Invalid structured output");
+          return;
+        }
+        const { prompt, caption } = validated.data;
+        if (!prompt) {
+          this.ctx.logger.error("No prompt in structured output");
+          return;
+        }
         const imageResult = await this.ctx.openai.generateImage({ prompt });
         await imageResult.match(
           async ({ buffer }) => {
@@ -90,23 +116,3 @@ export class ImageOfDayFeature implements Feature {
   }
 }
 
-function parsePromptResponse(raw: string) {
-  try {
-    const jsonStart = raw.indexOf("{");
-    if (jsonStart >= 0) {
-      const parsed = JSON.parse(raw.slice(jsonStart));
-      return {
-        prompt: parsed.prompt ?? raw,
-        caption: parsed.caption ?? null
-      };
-    }
-  } catch {
-    // fallthrough
-  }
-  const promptMatch = raw.match(/prompt\s*[:=-]\s*(.+)/i);
-  const captionMatch = raw.match(/caption\s*[:=-]\s*(.+)/i);
-  return {
-    prompt: promptMatch?.[1]?.trim() ?? raw.trim(),
-    caption: captionMatch?.[1]?.trim() ?? null
-  };
-}

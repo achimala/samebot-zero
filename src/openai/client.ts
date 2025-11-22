@@ -17,25 +17,79 @@ export class OpenAIClient {
   }
 
   chat(options: { messages: ChatMessage[]; allowSearch?: boolean }) {
+    const input: OpenAI.Responses.ResponseInput = options.messages.map((message) => ({
+      role: message.role,
+      content: [{ type: "input_text" as const, text: message.content }]
+    }));
+    const baseParams: { model: string; input: OpenAI.Responses.ResponseInput } = {
+      model: "gpt-5.1",
+      input
+    };
+    const params = options.allowSearch
+      ? { ...baseParams, tools: [{ type: "web_search" as const }] }
+      : baseParams;
     return ResultAsync.fromPromise(
-      this.client.responses.create({
-        model: "gpt-5.1",
-        input: options.messages.map((message) => ({
-          role: message.role,
-          content: [{ type: "input_text", text: message.content }]
-        })),
-        tools: options.allowSearch ? [{ type: "web_search" }] : undefined
-      }),
+      this.client.responses.create(params),
       (error) => {
         this.logger.error({ err: error }, "OpenAI chat failed");
         return Errors.openai(error instanceof Error ? error.message : "Unknown OpenAI error");
       }
     ).andThen((response) => {
-      const text = this.extractText(response);
-      if (!text) {
-        return err<never, BotError>(Errors.openai("OpenAI returned no text"));
+      if ("id" in response && "output" in response) {
+        const text = this.extractText(response);
+        if (!text) {
+          return err<never, BotError>(Errors.openai("OpenAI returned no text"));
+        }
+        return ok(text.trim());
       }
-      return ok(text.trim());
+      return err<never, BotError>(Errors.openai("OpenAI returned streaming response instead of non-streaming"));
+    });
+  }
+
+  chatStructured<T>(options: {
+    messages: ChatMessage[];
+    schema: { [key: string]: unknown };
+    schemaName: string;
+    schemaDescription?: string;
+    allowSearch?: boolean;
+  }) {
+    const input: OpenAI.Responses.ResponseInput = options.messages.map((message) => ({
+      role: message.role,
+      content: [{ type: "input_text" as const, text: message.content }]
+    }));
+    const format: OpenAI.Responses.ResponseFormatTextJSONSchemaConfig = {
+      type: "json_schema",
+      name: options.schemaName,
+      schema: options.schema,
+      strict: true
+    };
+    if (options.schemaDescription !== undefined) {
+      format.description = options.schemaDescription;
+    }
+    const baseParams: {
+      model: string;
+      input: OpenAI.Responses.ResponseInput;
+      text?: { format: OpenAI.Responses.ResponseFormatTextJSONSchemaConfig };
+    } = {
+      model: "gpt-5.1",
+      input,
+      text: { format }
+    };
+    const params = options.allowSearch
+      ? { ...baseParams, tools: [{ type: "web_search" as const }] }
+      : baseParams;
+    return ResultAsync.fromPromise(
+      this.client.responses.parse(params),
+      (error) => {
+        this.logger.error({ err: error }, "OpenAI structured chat failed");
+        return Errors.openai(error instanceof Error ? error.message : "Unknown OpenAI error");
+      }
+    ).andThen((response) => {
+      const parsedData = response.output_parsed as T | null;
+      if (parsedData === null) {
+        return err<never, BotError>(Errors.openai("OpenAI returned no structured data"));
+      }
+      return ok(parsedData);
     });
   }
 
@@ -64,24 +118,23 @@ export class OpenAIClient {
 
   private extractText(response: OpenAI.Responses.Response) {
     if (response.output) {
-      const chunks = response.output
-        .flatMap((entry) => entry.content ?? [])
-        .filter((content) => content.type === "output_text")
-        .map((content) => (content.type === "output_text" ? content.text : ""));
+      const chunks: string[] = [];
+      for (const entry of response.output) {
+        if ("content" in entry && entry.content) {
+          for (const content of entry.content) {
+            if (content.type === "output_text") {
+              chunks.push(content.text);
+            }
+          }
+        }
+      }
       const combined = chunks.join("\n").trim();
       if (combined.length > 0) {
         return combined;
       }
     }
 
-    // Fallback for future API changes
-    if ("output_text" in response && Array.isArray((response as any).output_text)) {
-      const text = ((response as any).output_text as string[]).join("\n").trim();
-      if (text.length > 0) {
-        return text;
-      }
-    }
-
     return null;
   }
+
 }

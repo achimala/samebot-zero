@@ -1,5 +1,5 @@
 import type { Client, Message, TextBasedChannel } from "discord.js";
-import { ResultAsync, err, ok } from "neverthrow";
+import { ResultAsync, err } from "neverthrow";
 import type { Logger } from "pino";
 import { Errors, type BotError } from "../core/errors";
 
@@ -12,7 +12,9 @@ export class DiscordMessenger {
     return ResultAsync.fromPromise(this.fetchTextChannel(channelId), (error) => {
       this.logger.error({ err: error }, "Failed to fetch channel");
       return Errors.discord("Unable to fetch channel");
-    }).andThen((channel) => this.sendContent(channel, content));
+    }).andThen((channel) => {
+      return this.sendContent(channel, content);
+    });
   }
 
   replyToMessage(message: Message, content: string) {
@@ -23,24 +25,32 @@ export class DiscordMessenger {
     return ResultAsync.fromPromise(this.fetchTextChannel(channelId), (error) => {
       this.logger.error({ err: error }, "Failed to fetch channel");
       return Errors.discord("Unable to fetch channel for image");
-    }).andThen((channel) =>
-      ResultAsync.fromPromise(
-        channel.send({
-          content: description,
-          files: [
-            {
-              attachment: buffer,
-              name: filename,
-              description
-            }
-          ]
-        }),
+    }).andThen((channel) => {
+      if (!("send" in channel) || typeof channel.send !== "function") {
+        return err<never, BotError>(Errors.discord("Channel does not support sending messages"));
+      }
+      const filePayload: { attachment: Buffer; name: string; description?: string } = {
+        attachment: buffer,
+        name: filename
+      };
+      if (description !== undefined) {
+        filePayload.description = description;
+      }
+      const sendOptions: { files: typeof filePayload[]; content?: string } = {
+        files: [filePayload]
+      };
+      if (description !== undefined) {
+        sendOptions.content = description;
+      }
+      const sendPromise: Promise<Message> = channel.send(sendOptions);
+      return ResultAsync.fromPromise(
+        sendPromise,
         (error) => {
           this.logger.error({ err: error }, "Failed to send attachment");
           return Errors.discord("Unable to send attachment");
         }
-      ).map(() => undefined)
-    );
+      ).map<void>(() => undefined);
+    });
   }
 
   private fetchTextChannel(channelId: string) {
@@ -50,16 +60,30 @@ export class DiscordMessenger {
   private sendContent(channel: TextBasedChannel, content: string, replyTo?: Message) {
     const chunks = chunkMessage(content);
     return chunks.reduce<ResultAsync<void, BotError>>((acc, chunk) => {
-      return acc.andThen(() =>
-        ResultAsync.fromPromise(
-          replyTo ? replyTo.reply(chunk) : channel.send(chunk),
+      return acc.andThen(() => {
+        if (replyTo) {
+          const replyPromise: Promise<Message> = replyTo.reply(chunk);
+          return ResultAsync.fromPromise(
+            replyPromise,
+            (error) => {
+              this.logger.error({ err: error }, "Failed to send message");
+              return Errors.discord("Unable to send message");
+            }
+          ).map<void>(() => undefined);
+        }
+        if (!("send" in channel) || typeof channel.send !== "function") {
+          return err<never, BotError>(Errors.discord("Channel does not support sending messages"));
+        }
+        const sendPromise: Promise<Message> = channel.send(chunk);
+        return ResultAsync.fromPromise(
+          sendPromise,
           (error) => {
             this.logger.error({ err: error }, "Failed to send message");
             return Errors.discord("Unable to send message");
           }
-        ).map(() => undefined)
-      );
-    }, ok(undefined));
+        ).map<void>(() => undefined);
+      });
+    }, ResultAsync.fromSafePromise<void>(Promise.resolve(undefined)));
   }
 }
 

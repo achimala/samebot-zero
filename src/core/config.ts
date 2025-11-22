@@ -26,7 +26,7 @@ export type AppConfig = {
 export function loadConfig(): AppConfig {
   const parsed = ConfigSchema.safeParse(process.env);
   if (!parsed.success) {
-    const formatted = parsed.error.errors.map((err) => `${err.path.join(".")}: ${err.message}`).join("\n");
+    const formatted = parsed.error.issues.map((err: z.ZodIssue) => `${err.path.join(".")}: ${err.message}`).join("\n");
     throw new Error(`Invalid configuration:\n${formatted}`);
   }
 
