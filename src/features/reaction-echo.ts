@@ -32,7 +32,11 @@ export class ReactionEchoFeature implements Feature {
       const fetched = fullReaction.message.partial
         ? await fullReaction.message.fetch()
         : fullReaction.message;
-      if (fetched.author === null || this.ctx.discord.user === null || fetched.author.id === this.ctx.discord.user.id) {
+      if (
+        fetched.author === null ||
+        this.ctx.discord.user === null ||
+        fetched.author.id === this.ctx.discord.user.id
+      ) {
         return;
       }
       await fetched.react(fullReaction.emoji);

@@ -99,7 +99,9 @@ export class DiscordMessenger {
           }
           const sendableChannel = this.assertSendableChannel(channel);
           if (sendableChannel === null) {
-            return err(Errors.discord("Channel does not support sending messages"));
+            return err(
+              Errors.discord("Channel does not support sending messages"),
+            );
           }
           const sendPromise: Promise<Message> = sendableChannel.send(chunk);
           return ResultAsync.fromPromise(sendPromise, (error) => {

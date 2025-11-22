@@ -5,7 +5,7 @@ A modern, single-process TypeScript rewrite of Samebot Neue. It keeps the fun co
 ## Features
 
 - **Conversation brain** – persona-aware replies for guild channels and DMs with smart mention/follow-up heuristics.
-- **Slash utilities** – `/img` generates art with `gpt-image-1`, `/debug` dumps the live context for the current channel.
+- **Slash utilities** – `/img` generates art with Google’s Nano Banana Pro (`gemini-3-pro-image-preview`), `/debug` dumps the live context for the current channel.
 - **Auto-react + reaction echo** – lightweight emoji reactions powered by GPT and a Swift-style +1 port.
 - **Image of the day** – daily meme prompt + caption scheduled for 8am America/Los_Angeles sent to a configurable channel.
 - **Zero microservices** – Discord gateway, schedulers, and OpenAI access all run inside one Node process with strict typing and `neverthrow` results.
@@ -19,6 +19,7 @@ A modern, single-process TypeScript rewrite of Samebot Neue. It keeps the fun co
 2. **Configure environment** – copy `.env.example` to `.env` and fill in values:
    - `DISCORD_TOKEN`, `DISCORD_APP_ID`
    - `OPENAI_API_KEY`
+   - `GOOGLE_API_KEY` (Google AI Studio key for Nano Banana Pro)
    - `MAIN_CHANNEL_ID` (bot's home channel)
    - `IMAGE_OF_DAY_CHANNEL_ID` (defaults to `MAIN_CHANNEL_ID` if omitted)
 3. **Run locally**

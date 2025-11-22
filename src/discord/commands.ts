@@ -3,7 +3,7 @@ import { SlashCommandBuilder } from "discord.js";
 export const commandDefinitions = [
   new SlashCommandBuilder()
     .setName("img")
-    .setDescription("Generate an image with gpt-image-1")
+    .setDescription("Generate an image with nano banana")
     .addStringOption((option) =>
       option
         .setName("prompt")

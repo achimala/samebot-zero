@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 import { ResultAsync, err, ok } from "neverthrow";
 import type { Logger } from "pino";
 import type { AppConfig } from "../core/config";
@@ -9,14 +10,33 @@ export type ChatMessage = {
   content: string;
 };
 
+const DEFAULT_IMAGE_CONFIG = {
+  aspectRatio: "1:1" as const,
+  imageSize: "1K" as const,
+};
+
+type ImageAspectRatio =
+  | "1:1"
+  | "2:3"
+  | "3:2"
+  | "3:4"
+  | "4:3"
+  | "9:16"
+  | "16:9"
+  | "21:9";
+
+type ImageResolution = "1K" | "2K" | "4K";
+
 export class OpenAIClient {
   private readonly client: OpenAI;
+  private readonly geminiClient: GoogleGenAI;
 
   constructor(
     private readonly config: AppConfig,
     private readonly logger: Logger,
   ) {
     this.client = new OpenAI({ apiKey: config.openAIApiKey });
+    this.geminiClient = new GoogleGenAI({ apiKey: config.googleApiKey });
   }
 
   private formatMessageForInput(
@@ -121,30 +141,51 @@ export class OpenAIClient {
     });
   }
 
-  generateImage(options: { prompt: string }) {
+  generateImage(options: {
+    prompt: string;
+    aspectRatio?: ImageAspectRatio;
+    imageSize?: ImageResolution;
+  }) {
+    const imageConfig = {
+      aspectRatio: options.aspectRatio ?? DEFAULT_IMAGE_CONFIG.aspectRatio,
+      imageSize: options.imageSize ?? DEFAULT_IMAGE_CONFIG.imageSize,
+    };
+
     return ResultAsync.fromPromise(
-      this.client.images.generate({
-        model: "gpt-image-1",
-        prompt: options.prompt,
-        size: "1024x1024",
-        quality: "high",
-        response_format: "b64_json",
+      this.geminiClient.models.generateContent({
+        model: "gemini-3-pro-image-preview",
+        contents: options.prompt,
+        config: {
+          responseModalities: ["IMAGE"],
+          imageConfig,
+        },
       }),
       (error) => {
-        this.logger.error({ err: error }, "OpenAI image failed");
+        this.logger.error({ err: error }, "Gemini image failed");
         return Errors.openai(
-          error instanceof Error ? error.message : "Unknown OpenAI error",
+          error instanceof Error ? error.message : "Unknown Gemini error",
         );
       },
     ).andThen((response) => {
-      const imageData = response.data![0]!.b64_json;
-      if (!imageData) {
-        return err<never, BotError>(
-          Errors.openai("Image generation returned no data"),
-        );
+      const candidates = response.candidates ?? [];
+      for (const candidate of candidates) {
+        const parts = candidate.content?.parts ?? [];
+        for (const part of parts) {
+          const inlineData = part.inlineData;
+          if (
+            part.thought ||
+            !inlineData?.data ||
+            !inlineData.mimeType?.startsWith("image/")
+          ) {
+            continue;
+          }
+          const buffer = Buffer.from(inlineData.data, "base64");
+          return ok({ buffer, prompt: options.prompt });
+        }
       }
-      const buffer = Buffer.from(imageData, "base64");
-      return ok({ buffer, prompt: options.prompt });
+      return err<never, BotError>(
+        Errors.openai("Image generation returned no data"),
+      );
     });
   }
 
