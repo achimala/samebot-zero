@@ -31,12 +31,12 @@ interface MessageReference {
 
 interface BotAction {
   type: "send_message" | "react" | "generate_image";
-  messageId?: string;
-  content?: string;
-  emoji?: string;
-  prompt?: string;
-  aspectRatio?: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9";
-  imageSize?: "1K" | "2K" | "4K";
+  messageId: string | null;
+  content: string | null;
+  emoji: string | null;
+  prompt: string | null;
+  aspectRatio: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9" | null;
+  imageSize: "1K" | "2K" | "4K" | null;
 }
 
 interface BotActions {
@@ -239,33 +239,33 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                   description: "The type of action to perform",
                 },
                 content: {
-                  type: "string",
-                  description: "Message content (required for send_message)",
+                  type: ["string", "null"],
+                  description: "Message content (required for send_message, null otherwise)",
                 },
                 messageId: {
-                  type: "string",
-                  description: "Message ID to react to (required for react)",
+                  type: ["string", "null"],
+                  description: "Message ID to react to (required for react, null otherwise)",
                 },
                 emoji: {
-                  type: "string",
-                  description: "Emoji to react with. Can be Unicode emoji or custom emoji name/format. (required for react)",
+                  type: ["string", "null"],
+                  description: "Emoji to react with. Can be Unicode emoji or custom emoji name/format. (required for react, null otherwise)",
                 },
                 prompt: {
-                  type: "string",
-                  description: "Image generation prompt (required for generate_image)",
+                  type: ["string", "null"],
+                  description: "Image generation prompt (required for generate_image, null otherwise)",
                 },
                 aspectRatio: {
-                  type: "string",
+                  type: ["string", "null"],
                   enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"],
                   description: "Aspect ratio for image generation (optional, defaults to 1:1)",
                 },
                 imageSize: {
-                  type: "string",
+                  type: ["string", "null"],
                   enum: ["1K", "2K", "4K"],
                   description: "Image size for image generation (optional, defaults to 1K)",
                 },
               },
-              required: ["type"],
+              required: ["type", "content", "messageId", "emoji", "prompt", "aspectRatio", "imageSize"],
               additionalProperties: false,
             },
           },
@@ -292,7 +292,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         messageIdMap.set(message.id, message);
 
         for (const action of actions.actions) {
-          if (action.type === "send_message" && action.content) {
+          if (action.type === "send_message" && action.content !== null) {
             const channel = await this.ctx.discord.channels.fetch(message.channelId);
             if (channel && channel.isTextBased() && "send" in channel) {
               try {
@@ -310,7 +310,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 );
               }
             }
-          } else if (action.type === "react" && action.messageId && action.emoji) {
+          } else if (action.type === "react" && action.messageId !== null && action.emoji !== null) {
             const targetMessage = messageIdMap.get(action.messageId) || message;
             const emoji = this.resolveEmoji(action.emoji);
             if (emoji) {
@@ -320,7 +320,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 this.ctx.logger.warn({ err: error, emoji }, "Failed to react");
               }
             }
-          } else if (action.type === "generate_image" && action.prompt) {
+          } else if (action.type === "generate_image" && action.prompt !== null) {
             const imageOptions: {
               prompt: string;
               aspectRatio?: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9";
@@ -328,10 +328,10 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
             } = {
               prompt: action.prompt,
             };
-            if (action.aspectRatio !== undefined) {
+            if (action.aspectRatio !== null) {
               imageOptions.aspectRatio = action.aspectRatio;
             }
-            if (action.imageSize !== undefined) {
+            if (action.imageSize !== null) {
               imageOptions.imageSize = action.imageSize;
             }
             const imageResult = await this.ctx.openai.generateImage(imageOptions);
@@ -341,7 +341,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                   message.channelId,
                   buffer,
                   "samebot-image.png",
-                  action.prompt,
+                  action.prompt!,
                 ).match(
                   async () => undefined,
                   async (sendError: BotError) => {
