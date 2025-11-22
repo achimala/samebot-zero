@@ -203,11 +203,7 @@ export class AgentLaunchFeature implements Feature {
           attempts++;
           continue;
         }
-        if (
-          status.status === "FINISHED" &&
-          !prUrl &&
-          attempts < 30
-        ) {
+        if (status.status === "FINISHED" && !prUrl && attempts < 30) {
           attempts++;
           continue;
         }

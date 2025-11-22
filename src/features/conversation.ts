@@ -35,7 +35,16 @@ interface BotAction {
   content: string | null;
   emoji: string | null;
   prompt: string | null;
-  aspectRatio: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9" | null;
+  aspectRatio:
+    | "1:1"
+    | "2:3"
+    | "3:2"
+    | "3:4"
+    | "4:3"
+    | "9:16"
+    | "16:9"
+    | "21:9"
+    | null;
   imageSize: "1K" | "2K" | "4K" | null;
 }
 
@@ -81,12 +90,14 @@ export class ConversationFeature implements Feature {
           : timeAgo < 3600
             ? `${Math.round(timeAgo / 60)}m ago`
             : `${Math.round(timeAgo / 3600)}h ago`;
-      
+
       const authorMatch = message.content.match(/^([^:]+): (.+)$/);
       const author = authorMatch ? authorMatch[1] : undefined;
       const content = authorMatch ? authorMatch[2] : message.content;
-      
-      lines.push(`[${timeAgoText}] [${messageId}] ${message.role}: ${message.content}`);
+
+      lines.push(
+        `[${timeAgoText}] [${messageId}] ${message.role}: ${message.content}`,
+      );
       if (message.role !== "system") {
         const reference: MessageReference = {
           id: messageId,
@@ -195,7 +206,7 @@ export class ConversationFeature implements Feature {
     }
 
     await (message.channel as { sendTyping: () => Promise<void> }).sendTyping();
-    
+
     const contextWithIds = this.formatContextWithIds(context);
     const emojiList = this.buildEmojiList();
     const emojiContext =
@@ -240,32 +251,55 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 },
                 content: {
                   type: ["string", "null"],
-                  description: "Message content (required for send_message, null otherwise)",
+                  description:
+                    "Message content (required for send_message, null otherwise)",
                 },
                 messageId: {
                   type: ["string", "null"],
-                  description: "Message ID to react to (required for react, null otherwise)",
+                  description:
+                    "Message ID to react to (required for react, null otherwise)",
                 },
                 emoji: {
                   type: ["string", "null"],
-                  description: "Emoji to react with. Can be Unicode emoji or custom emoji name/format. (required for react, null otherwise)",
+                  description:
+                    "Emoji to react with. Can be Unicode emoji or custom emoji name/format. (required for react, null otherwise)",
                 },
                 prompt: {
                   type: ["string", "null"],
-                  description: "Image generation prompt (required for generate_image, null otherwise)",
+                  description:
+                    "Image generation prompt (required for generate_image, null otherwise)",
                 },
                 aspectRatio: {
                   type: ["string", "null"],
-                  enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"],
-                  description: "Aspect ratio for image generation (optional, defaults to 1:1)",
+                  enum: [
+                    "1:1",
+                    "2:3",
+                    "3:2",
+                    "3:4",
+                    "4:3",
+                    "9:16",
+                    "16:9",
+                    "21:9",
+                  ],
+                  description:
+                    "Aspect ratio for image generation (optional, defaults to 1:1)",
                 },
                 imageSize: {
                   type: ["string", "null"],
                   enum: ["1K", "2K", "4K"],
-                  description: "Image size for image generation (optional, defaults to 1K)",
+                  description:
+                    "Image size for image generation (optional, defaults to 1K)",
                 },
               },
-              required: ["type", "content", "messageId", "emoji", "prompt", "aspectRatio", "imageSize"],
+              required: [
+                "type",
+                "content",
+                "messageId",
+                "emoji",
+                "prompt",
+                "aspectRatio",
+                "imageSize",
+              ],
               additionalProperties: false,
             },
           },
@@ -279,6 +313,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
 
     await response.match(
       async (actions) => {
+        this.ctx.logger.info({ actions }, "Action output");
         const messageIdMap = new Map<string, Message>();
         for (const ref of contextWithIds.references) {
           const matchingMessage = await this.findMessageById(
@@ -293,7 +328,9 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
 
         for (const action of actions.actions) {
           if (action.type === "send_message" && action.content !== null) {
-            const channel = await this.ctx.discord.channels.fetch(message.channelId);
+            const channel = await this.ctx.discord.channels.fetch(
+              message.channelId,
+            );
             if (channel && channel.isTextBased() && "send" in channel) {
               try {
                 const sentMessage = await channel.send(action.content);
@@ -310,7 +347,11 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 );
               }
             }
-          } else if (action.type === "react" && action.messageId !== null && action.emoji !== null) {
+          } else if (
+            action.type === "react" &&
+            action.messageId !== null &&
+            action.emoji !== null
+          ) {
             const targetMessage = messageIdMap.get(action.messageId) || message;
             const emoji = this.resolveEmoji(action.emoji);
             if (emoji) {
@@ -320,10 +361,21 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 this.ctx.logger.warn({ err: error, emoji }, "Failed to react");
               }
             }
-          } else if (action.type === "generate_image" && action.prompt !== null) {
+          } else if (
+            action.type === "generate_image" &&
+            action.prompt !== null
+          ) {
             const imageOptions: {
               prompt: string;
-              aspectRatio?: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9";
+              aspectRatio?:
+                | "1:1"
+                | "2:3"
+                | "3:2"
+                | "3:4"
+                | "4:3"
+                | "9:16"
+                | "16:9"
+                | "21:9";
               imageSize?: "1K" | "2K" | "4K";
             } = {
               prompt: action.prompt,
@@ -334,26 +386,32 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
             if (action.imageSize !== null) {
               imageOptions.imageSize = action.imageSize;
             }
-            const imageResult = await this.ctx.openai.generateImage(imageOptions);
+            const imageResult =
+              await this.ctx.openai.generateImage(imageOptions);
             await imageResult.match(
               async ({ buffer }) => {
-                await this.ctx.messenger.sendBuffer(
-                  message.channelId,
-                  buffer,
-                  "samebot-image.png",
-                  action.prompt!,
-                ).match(
-                  async () => undefined,
-                  async (sendError: BotError) => {
-                    this.ctx.logger.error(
-                      { err: sendError },
-                      "Failed to send image",
-                    );
-                  },
-                );
+                await this.ctx.messenger
+                  .sendBuffer(
+                    message.channelId,
+                    buffer,
+                    "samebot-image.png",
+                    action.prompt!,
+                  )
+                  .match(
+                    async () => undefined,
+                    async (sendError: BotError) => {
+                      this.ctx.logger.error(
+                        { err: sendError },
+                        "Failed to send image",
+                      );
+                    },
+                  );
               },
               async (error) => {
-                this.ctx.logger.error({ err: error }, "Image generation failed");
+                this.ctx.logger.error(
+                  { err: error },
+                  "Image generation failed",
+                );
               },
             );
           }
@@ -553,15 +611,26 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
 
   private resolveEmoji(emojiString: string): string | null {
     const trimmed = emojiString.trim();
-    if (trimmed.startsWith("<") && trimmed.endsWith(">")) {
-      return trimmed;
+
+    if (trimmed.length === 0) {
+      return null;
     }
+
+    if (trimmed.startsWith("<") && trimmed.endsWith(">")) {
+      const customEmojiMatch = trimmed.match(/^<a?:([^:]+):(\d+)>$/);
+      if (customEmojiMatch) {
+        return trimmed;
+      }
+      return null;
+    }
+
     const customEmoji = this.ctx.customEmoji.get(trimmed);
     if (customEmoji) {
       return customEmoji.animated
         ? `<a:${customEmoji.name}:${customEmoji.id}>`
         : `<:${customEmoji.name}:${customEmoji.id}>`;
     }
+
     return trimmed;
   }
 
@@ -589,7 +658,8 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
 
   private async handleStartup() {
     const mainChannelId = this.ctx.config.mainChannelId;
-    const channel = this.ctx.discord.channels.cache.get(mainChannelId) ||
+    const channel =
+      this.ctx.discord.channels.cache.get(mainChannelId) ||
       (await this.ctx.discord.channels.fetch(mainChannelId));
 
     if (!channel || !channel.isTextBased() || channel.isDMBased()) {
@@ -605,7 +675,10 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       }
 
       const mostRecentMessage = Array.from(messages.values())[0];
-      if (!mostRecentMessage || mostRecentMessage.createdTimestamp < oneDayAgo) {
+      if (
+        !mostRecentMessage ||
+        mostRecentMessage.createdTimestamp < oneDayAgo
+      ) {
         return;
       }
 
