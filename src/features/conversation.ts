@@ -101,7 +101,7 @@ export class ConversationFeature implements Feature {
         });
         context.history = context.history.slice(-12);
         context.lastResponseAt = Date.now();
-        await this.ctx.messenger.replyToMessage(message, reply).match(
+        await this.ctx.messenger.sendToChannel(message.channelId, reply).match(
           async () => undefined,
           async (sendError: BotError) => {
             this.ctx.logger.error(
@@ -118,7 +118,7 @@ export class ConversationFeature implements Feature {
         );
         if (error.type === "openai") {
           await this.ctx.messenger
-            .replyToMessage(message, "something broke, brb")
+            .sendToChannel(message.channelId, "something broke, brb")
             .match(
               async () => undefined,
               async (sendError: BotError) =>
