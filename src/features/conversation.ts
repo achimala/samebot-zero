@@ -38,17 +38,17 @@ export class ConversationFeature implements Feature {
     if (message.author.bot || message.system) {
       return;
     }
-    if (!message.inGuild() && !(message.channel?.isDMBased())) {
+    if (!message.inGuild() && !message.channel.isDMBased()) {
       return;
     }
 
-    const key = message.channelId ?? message.author.id;
+    const key = message.channelId || message.author.id;
     const isDm = !message.inGuild();
     const context = this.contexts.get(key) ?? { history: [], isDm };
     context.isDm = isDm;
     this.contexts.set(key, context);
 
-    const formatted = `${message.author.displayName ?? message.author.username}: ${this.enrichContent(message)}`;
+    const formatted = `${message.author.displayName || message.author.username}: ${this.enrichContent(message)}`;
     context.history.push({ role: "user", content: formatted });
     context.history = context.history.slice(-12);
 
@@ -56,9 +56,7 @@ export class ConversationFeature implements Feature {
       return;
     }
 
-    if ("sendTyping" in message.channel && typeof message.channel.sendTyping === "function") {
-      await message.channel.sendTyping();
-    }
+    await (message.channel as { sendTyping: () => Promise<void> }).sendTyping();
     const allowSearch = this.shouldUseSearchHint(message);
     const messages: ChatMessage[] = [
       {
@@ -119,7 +117,7 @@ export class ConversationFeature implements Feature {
   }
 
   private enrichContent(message: Message) {
-    let content = message.content ?? "";
+    let content = message.content || "";
     if (message.attachments.size > 0) {
       const attachments = Array.from(message.attachments.values())
         .filter((attachment) => attachment.contentType?.startsWith("image"))
@@ -132,7 +130,7 @@ export class ConversationFeature implements Feature {
   }
 
   private async handleDebug(interaction: ChatInputCommandInteraction) {
-    const key = interaction.channelId ?? interaction.user.id;
+    const key = interaction.channelId || interaction.user.id;
     const context = this.contexts.get(key);
     if (!context) {
       await interaction.reply({ content: "no context yet", ephemeral: true });

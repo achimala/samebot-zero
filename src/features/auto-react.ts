@@ -19,7 +19,7 @@ export class AutoReactFeature implements Feature {
       return;
     }
     const prompt = `You read Discord chat messages and react with up to 3 emojis.
-Messages: "${message.author.displayName ?? message.author.username}: ${message.content}"
+Messages: "${message.author.displayName || message.author.username}: ${message.content}"
 Respond with emojis separated by spaces only.`;
     const result = await this.ctx.openai.chat({
       messages: [

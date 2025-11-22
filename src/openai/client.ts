@@ -35,14 +35,11 @@ export class OpenAIClient {
         return Errors.openai(error instanceof Error ? error.message : "Unknown OpenAI error");
       }
     ).andThen((response) => {
-      if ("id" in response && "output" in response) {
-        const text = this.extractText(response);
-        if (!text) {
-          return err<never, BotError>(Errors.openai("OpenAI returned no text"));
-        }
-        return ok(text.trim());
+      const text = this.extractText(response);
+      if (!text) {
+        return err<never, BotError>(Errors.openai("OpenAI returned no text"));
       }
-      return err<never, BotError>(Errors.openai("OpenAI returned streaming response instead of non-streaming"));
+      return ok(text.trim());
     });
   }
 
@@ -107,7 +104,7 @@ export class OpenAIClient {
         return Errors.openai(error instanceof Error ? error.message : "Unknown OpenAI error");
       }
     ).andThen((response) => {
-      const imageData = response.data?.[0]?.b64_json;
+      const imageData = response.data![0]!.b64_json;
       if (!imageData) {
         return err<never, BotError>(Errors.openai("Image generation returned no data"));
       }
@@ -117,23 +114,20 @@ export class OpenAIClient {
   }
 
   private extractText(response: OpenAI.Responses.Response) {
-    if (response.output) {
-      const chunks: string[] = [];
-      for (const entry of response.output) {
-        if ("content" in entry && entry.content) {
-          for (const content of entry.content) {
-            if (content.type === "output_text") {
-              chunks.push(content.text);
-            }
+    const chunks: string[] = [];
+    for (const entry of response.output) {
+      if (entry.type === "message") {
+        for (const content of entry.content) {
+          if (content.type === "output_text") {
+            chunks.push(content.text);
           }
         }
       }
-      const combined = chunks.join("\n").trim();
-      if (combined.length > 0) {
-        return combined;
-      }
     }
-
+    const combined = chunks.join("\n").trim();
+    if (combined.length > 0) {
+      return combined;
+    }
     return null;
   }
 

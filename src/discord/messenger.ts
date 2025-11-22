@@ -26,9 +26,6 @@ export class DiscordMessenger {
       this.logger.error({ err: error }, "Failed to fetch channel");
       return Errors.discord("Unable to fetch channel for image");
     }).andThen((channel) => {
-      if (!("send" in channel) || typeof channel.send !== "function") {
-        return err<never, BotError>(Errors.discord("Channel does not support sending messages"));
-      }
       const filePayload: { attachment: Buffer; name: string; description?: string } = {
         attachment: buffer,
         name: filename
@@ -70,9 +67,6 @@ export class DiscordMessenger {
               return Errors.discord("Unable to send message");
             }
           ).map<void>(() => undefined);
-        }
-        if (!("send" in channel) || typeof channel.send !== "function") {
-          return err<never, BotError>(Errors.discord("Channel does not support sending messages"));
         }
         const sendPromise: Promise<Message> = channel.send(chunk);
         return ResultAsync.fromPromise(

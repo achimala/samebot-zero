@@ -87,7 +87,7 @@ export class ImageOfDayFeature implements Feature {
                 this.ctx.config.imageOfDayChannelId,
                 buffer,
                 "image-of-the-day.png",
-                caption ?? prompt
+                caption || prompt
               )
               .match(
                 async () => undefined,
