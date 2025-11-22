@@ -3,6 +3,7 @@ import type { Client } from "discord.js";
 import type { AppConfig } from "./config";
 import type { OpenAIClient } from "../openai/client";
 import type { DiscordMessenger } from "../discord/messenger";
+import type { SupabaseClient } from "../supabase/client";
 
 export interface RuntimeContext {
   config: AppConfig;
@@ -10,6 +11,7 @@ export interface RuntimeContext {
   discord: Client;
   openai: OpenAIClient;
   messenger: DiscordMessenger;
+  supabase: SupabaseClient;
 }
 
 export interface Feature {

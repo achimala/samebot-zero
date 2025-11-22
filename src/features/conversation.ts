@@ -147,7 +147,8 @@ export class ConversationFeature implements Feature {
     beforeMessageId: string,
   ) {
     try {
-      const channel = this.ctx.discord.channels.cache.get(channelId) ||
+      const channel =
+        this.ctx.discord.channels.cache.get(channelId) ||
         (await this.ctx.discord.channels.fetch(channelId));
       if (!channel || !channel.isTextBased()) {
         return;
