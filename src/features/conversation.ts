@@ -231,70 +231,42 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           actions: {
             type: "array",
             items: {
-              oneOf: [
-                {
-                  type: "object",
-                  properties: {
-                    type: {
-                      type: "string",
-                      enum: ["send_message"],
-                      description: "The type of action to perform",
-                    },
-                    content: {
-                      type: "string",
-                      description: "Message content",
-                    },
-                  },
-                  required: ["type", "content"],
-                  additionalProperties: false,
+              type: "object",
+              properties: {
+                type: {
+                  type: "string",
+                  enum: ["send_message", "react", "generate_image"],
+                  description: "The type of action to perform",
                 },
-                {
-                  type: "object",
-                  properties: {
-                    type: {
-                      type: "string",
-                      enum: ["react"],
-                      description: "The type of action to perform",
-                    },
-                    messageId: {
-                      type: "string",
-                      description: "Message ID to react to",
-                    },
-                    emoji: {
-                      type: "string",
-                      description: "Emoji to react with. Can be Unicode emoji or custom emoji name/format.",
-                    },
-                  },
-                  required: ["type", "messageId", "emoji"],
-                  additionalProperties: false,
+                content: {
+                  type: "string",
+                  description: "Message content (required for send_message)",
                 },
-                {
-                  type: "object",
-                  properties: {
-                    type: {
-                      type: "string",
-                      enum: ["generate_image"],
-                      description: "The type of action to perform",
-                    },
-                    prompt: {
-                      type: "string",
-                      description: "Image generation prompt",
-                    },
-                    aspectRatio: {
-                      type: "string",
-                      enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"],
-                      description: "Aspect ratio for image generation (optional, defaults to 1:1)",
-                    },
-                    imageSize: {
-                      type: "string",
-                      enum: ["1K", "2K", "4K"],
-                      description: "Image size for image generation (optional, defaults to 1K)",
-                    },
-                  },
-                  required: ["type", "prompt"],
-                  additionalProperties: false,
+                messageId: {
+                  type: "string",
+                  description: "Message ID to react to (required for react)",
                 },
-              ],
+                emoji: {
+                  type: "string",
+                  description: "Emoji to react with. Can be Unicode emoji or custom emoji name/format. (required for react)",
+                },
+                prompt: {
+                  type: "string",
+                  description: "Image generation prompt (required for generate_image)",
+                },
+                aspectRatio: {
+                  type: "string",
+                  enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"],
+                  description: "Aspect ratio for image generation (optional, defaults to 1:1)",
+                },
+                imageSize: {
+                  type: "string",
+                  enum: ["1K", "2K", "4K"],
+                  description: "Image size for image generation (optional, defaults to 1K)",
+                },
+              },
+              required: ["type"],
+              additionalProperties: false,
             },
           },
         },
