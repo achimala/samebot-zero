@@ -277,11 +277,17 @@ export class AgentLaunchFeature implements Feature {
           const buttons: ButtonBuilder[] = [followUpButton];
 
           if (prUrl) {
+            const prLinkButton = new ButtonBuilder()
+              .setLabel("View PR")
+              .setStyle(ButtonStyle.Link)
+              .setURL(prUrl);
+
             const mergeButton = new ButtonBuilder()
-              .setCustomId(`merge-${prUrl}`)
+              .setCustomId(`merge-${this.extractPrIdentifier(prUrl)}`)
               .setLabel("Merge PR")
               .setStyle(ButtonStyle.Success);
-            buttons.push(mergeButton);
+
+            buttons.push(prLinkButton, mergeButton);
           }
 
           const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -364,8 +370,35 @@ export class AgentLaunchFeature implements Feature {
     await interaction.showModal(modal);
   }
 
+  private extractPrIdentifier(prUrl: string): string {
+    const match = prUrl.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)$/);
+    if (match && match[1] && match[2] && match[3]) {
+      return `${match[1]}/${match[2]}#${match[3]}`;
+    }
+    return prUrl;
+  }
+
+  private reconstructPrUrl(identifier: string): string | null {
+    const match = identifier.match(/^([^/]+)\/([^#]+)#(\d+)$/);
+    if (match && match[1] && match[2] && match[3]) {
+      return `https://github.com/${match[1]}/${match[2]}/pull/${match[3]}`;
+    }
+    if (identifier.startsWith("https://")) {
+      return identifier;
+    }
+    return null;
+  }
+
   private async handleMergeButton(interaction: ButtonInteraction) {
-    const prUrl = interaction.customId.replace("merge-", "");
+    const prIdentifier = interaction.customId.replace("merge-", "");
+    const prUrl = this.reconstructPrUrl(prIdentifier);
+    if (!prUrl) {
+      await interaction.reply({
+        content: "❌ Invalid PR identifier",
+        ephemeral: true,
+      });
+      return;
+    }
     const discordUserId = interaction.user.id;
 
     const githubToken = await this.ctx.supabase.getGitHubToken(discordUserId);
@@ -378,7 +411,7 @@ export class AgentLaunchFeature implements Feature {
       this.pendingMerges.set(mergeId, {
         channelId,
         messageId,
-        prUrl,
+        prUrl: this.extractPrIdentifier(prUrl),
       });
 
       const modal = new ModalBuilder()
@@ -447,7 +480,15 @@ export class AgentLaunchFeature implements Feature {
 
     this.pendingMerges.delete(mergeId);
 
-    const { channelId, messageId, prUrl } = mergeData;
+    const { channelId, messageId, prUrl: prIdentifier } = mergeData;
+    const prUrl = this.reconstructPrUrl(prIdentifier);
+    if (!prUrl) {
+      await interaction.reply({
+        content: "❌ Invalid PR identifier",
+        ephemeral: true,
+      });
+      return;
+    }
     const githubToken = interaction.fields.getTextInputValue("github-token");
     const discordUserId = interaction.user.id;
 
@@ -579,7 +620,7 @@ export class AgentLaunchFeature implements Feature {
         merge_method: "squash",
       });
 
-      if (interaction.isButton()) {
+      if (interaction.isButton() || interaction.isModalSubmit()) {
         await interaction.editReply({
           content: `✅ Successfully merged PR #${prNumber}`,
         });
@@ -625,7 +666,7 @@ export class AgentLaunchFeature implements Feature {
       this.ctx.logger.error({ err: error, prUrl }, "Failed to merge PR");
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      if (interaction.isButton()) {
+      if (interaction.isButton() || interaction.isModalSubmit()) {
         await interaction.editReply({
           content: `❌ Failed to merge PR: ${errorMessage}`,
         });
