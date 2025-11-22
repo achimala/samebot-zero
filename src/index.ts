@@ -22,6 +22,8 @@ async function main() {
   const openai = new OpenAIClient(config, logger);
   const supabase = new SupabaseClient(config, logger);
 
+  const conversationFeature = new ConversationFeature();
+
   const runtime = {
     config,
     logger,
@@ -29,10 +31,11 @@ async function main() {
     messenger,
     openai,
     supabase,
+    conversation: conversationFeature,
   };
 
   const features: Feature[] = [
-    new ConversationFeature(),
+    conversationFeature,
     new AutoReactFeature(),
     new ReactionEchoFeature(),
     new ImageCommandFeature(),

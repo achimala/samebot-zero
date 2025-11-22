@@ -4,6 +4,7 @@ import type { AppConfig } from "./config";
 import type { OpenAIClient } from "../openai/client";
 import type { DiscordMessenger } from "../discord/messenger";
 import type { SupabaseClient } from "../supabase/client";
+import type { ConversationFeature } from "../features/conversation";
 
 export interface RuntimeContext {
   config: AppConfig;
@@ -12,6 +13,7 @@ export interface RuntimeContext {
   openai: OpenAIClient;
   messenger: DiscordMessenger;
   supabase: SupabaseClient;
+  conversation?: ConversationFeature;
 }
 
 export interface Feature {
