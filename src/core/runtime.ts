@@ -1,5 +1,5 @@
 import type { Logger } from "pino";
-import type { Client } from "discord.js";
+import type { Client, GuildEmoji } from "discord.js";
 import type { AppConfig } from "./config";
 import type { OpenAIClient } from "../openai/client";
 import type { DiscordMessenger } from "../discord/messenger";
@@ -14,6 +14,7 @@ export interface RuntimeContext {
   messenger: DiscordMessenger;
   supabase: SupabaseClient;
   conversation?: ConversationFeature;
+  customEmoji: Map<string, GuildEmoji>;
 }
 
 export interface Feature {

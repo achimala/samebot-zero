@@ -32,6 +32,7 @@ async function main() {
     openai,
     supabase,
     conversation: conversationFeature,
+    customEmoji: gateway.getCustomEmoji(),
   };
 
   const features: Feature[] = [

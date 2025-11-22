@@ -11,6 +11,31 @@ export class AutoReactFeature implements Feature {
     });
   }
 
+  private buildEmojiList(): string {
+    const emojiList: string[] = [];
+    for (const emoji of this.ctx.customEmoji.values()) {
+      const format = emoji.animated
+        ? `<a:${emoji.name}:${emoji.id}>`
+        : `<:${emoji.name}:${emoji.id}>`;
+      emojiList.push(`${emoji.name} (${format})`);
+    }
+    return emojiList.join(", ");
+  }
+
+  private resolveEmoji(emojiString: string): string | null {
+    const trimmed = emojiString.trim();
+    if (trimmed.startsWith("<") && trimmed.endsWith(">")) {
+      return trimmed;
+    }
+    const customEmoji = this.ctx.customEmoji.get(trimmed);
+    if (customEmoji) {
+      return customEmoji.animated
+        ? `<a:${customEmoji.name}:${customEmoji.id}>`
+        : `<:${customEmoji.name}:${customEmoji.id}>`;
+    }
+    return trimmed;
+  }
+
   private async handleMessage(message: Message) {
     if (message.author.bot || message.system || !message.inGuild()) {
       return;
@@ -18,14 +43,20 @@ export class AutoReactFeature implements Feature {
     if (Math.random() > 0.15) {
       return;
     }
+    const customEmojiList = this.buildEmojiList();
+    const emojiContext =
+      customEmojiList.length > 0
+        ? `\n\nAvailable custom emoji: ${customEmojiList}\nYou can use either standard Unicode emoji or custom emoji names/format.`
+        : "";
     const prompt = `You read Discord chat messages and react with up to 3 emojis.
 Messages: "${message.author.displayName || message.author.username}: ${message.content}"
-Respond with emojis separated by spaces only.`;
+Respond with emojis separated by spaces only.${emojiContext}`;
     const result = await this.ctx.openai.chat({
       messages: [
         {
           role: "system",
-          content: "Respond only with emojis separated by spaces.",
+          content:
+            "Respond only with emojis separated by spaces. You can use standard Unicode emoji or custom Discord emoji names/formats.",
         },
         { role: "user", content: prompt },
       ],
@@ -34,8 +65,8 @@ Respond with emojis separated by spaces only.`;
       async (text) => {
         const emojis = text
           .split(/\s+/)
-          .map((token) => token.trim())
-          .filter(Boolean)
+          .map((token) => this.resolveEmoji(token))
+          .filter((emoji): emoji is string => emoji !== null)
           .slice(0, 3);
         for (const emoji of emojis) {
           try {
