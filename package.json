@@ -1,0 +1,39 @@
+{
+  "name": "samebot-zero",
+  "version": "1.0.0",
+  "description": "Modern TypeScript rewrite of Samebot",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup src/index.ts --format esm --dts false",
+    "start": "node dist/index.js",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.23.0+sha512.21c4e5698002ade97e4efe8b8b4a89a8de3c85a37919f957e7a0f30f38fbc5bbdd05980ffe29179b2fb6e6e691242e098d945d1601772cad0fef5fb6411e2a4b",
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.2.3",
+    "emittery": "^1.2.0",
+    "luxon": "^3.7.2",
+    "neverthrow": "^8.2.0",
+    "openai": "^6.9.1",
+    "pino": "^10.1.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@total-typescript/ts-reset": "^0.6.1",
+    "@types/node": "^24.10.1",
+    "@typescript-eslint/eslint-plugin": "^8.47.0",
+    "@typescript-eslint/parser": "^8.47.0",
+    "eslint": "^9.39.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.13"
+  }
+}
