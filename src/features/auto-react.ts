@@ -3,9 +3,13 @@ import { type Feature, type RuntimeContext } from "../core/runtime";
 
 export class AutoReactFeature implements Feature {
   private ctx!: RuntimeContext;
+  private botUserId?: string;
 
   register(context: RuntimeContext): void {
     this.ctx = context;
+    context.discord.once("ready", (client) => {
+      this.botUserId = client.user.id;
+    });
     context.discord.on("messageCreate", (message) => {
       void this.handleMessage(message);
     });
@@ -36,13 +40,35 @@ export class AutoReactFeature implements Feature {
     return trimmed;
   }
 
+  private isExplicitReactRequest(message: Message): boolean {
+    if (this.botUserId && message.mentions.users.has(this.botUserId)) {
+      return true;
+    }
+    const content = message.content || "";
+    const lowerContent = content.toLowerCase();
+    const reactPatterns = [
+      /react\s+to\s+(this|that|it|my\s+message)/i,
+      /please\s+react/i,
+      /can\s+you\s+react/i,
+      /would\s+you\s+react/i,
+      /react\s+please/i,
+      /samebot.*react/i,
+      /react.*samebot/i,
+    ];
+    return reactPatterns.some((pattern) => pattern.test(lowerContent));
+  }
+
   private async handleMessage(message: Message) {
     if (message.author.bot || message.system || !message.inGuild()) {
       return;
     }
-    if (Math.random() > 0.15) {
+
+    const isExplicitRequest = this.isExplicitReactRequest(message);
+
+    if (!isExplicitRequest && Math.random() > 0.15) {
       return;
     }
+
     const customEmojiList = this.buildEmojiList();
     const emojiContext =
       customEmojiList.length > 0
