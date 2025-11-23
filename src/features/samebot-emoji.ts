@@ -8,7 +8,7 @@ export class SamebotEmojiFeature implements Feature {
     this.ctx = context;
     context.discord.on("interactionCreate", (interaction) => {
       if (!interaction.isChatInputCommand()) return;
-      if (interaction.commandName !== "samebot") return;
+      if (interaction.commandName !== "emoji") return;
       void this.handleSamebotEmoji(interaction);
     });
   }
@@ -32,10 +32,10 @@ export class SamebotEmojiFeature implements Feature {
 
     await interaction.deferReply();
 
-    const prompt = "a simple, cute robot character icon, transparent background, minimal design, suitable as a Discord emoji";
+    const prompt = interaction.options.getString("prompt", true);
 
     const result = await this.ctx.openai.generateImage({
-      prompt,
+      prompt: `${prompt}, transparent background, minimal design, suitable as a Discord emoji`,
       aspectRatio: "1:1",
       imageSize: "1K",
     });
