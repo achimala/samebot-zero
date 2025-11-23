@@ -48,9 +48,9 @@ export class AutoReactFeature implements Feature {
       customEmojiList.length > 0
         ? `\n\nAvailable custom emoji: ${customEmojiList}\nYou can use either standard Unicode emoji or custom emoji names/format.`
         : "";
-    const prompt = `You read Discord chat messages and react with up to 3 emojis.
-Messages: "${message.author.displayName || message.author.username}: ${message.content}"
-Respond with emojis separated by spaces only.${emojiContext}`;
+    const contextMessages = this.ctx.conversation?.buildContextMessages(
+      message.channelId,
+    ) || [];
     const result = await this.ctx.openai.chat({
       messages: [
         {
@@ -58,7 +58,11 @@ Respond with emojis separated by spaces only.${emojiContext}`;
           content:
             "Respond only with emojis separated by spaces. You can use standard Unicode emoji or custom Discord emoji names/formats.",
         },
-        { role: "user", content: prompt },
+        ...contextMessages,
+        {
+          role: "user",
+          content: `You read Discord chat messages and react with up to 3 emojis.\nMessages: "${message.author.displayName || message.author.username}: ${message.content}"\nRespond with emojis separated by spaces only.${emojiContext}`,
+        },
       ],
     });
     await result.match(

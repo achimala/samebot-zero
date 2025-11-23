@@ -73,6 +73,20 @@ export class ConversationFeature implements Feature {
     return this.responseDecision.buildConversationContext(context);
   }
 
+  buildContextMessages(channelId: string): ChatMessage[] {
+    const context = this.getContext(channelId);
+    if (!context || context.history.length === 0) {
+      return [];
+    }
+    const contextText = this.formatContext(context);
+    return [
+      {
+        role: "user",
+        content: `Recent conversation context:\n${contextText}`,
+      },
+    ];
+  }
+
   formatContextWithIds(context: ConversationContext): {
     text: string;
     references: MessageReference[];
@@ -726,16 +740,17 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         context.history = context.history.slice(-6);
         this.contexts.set(key, context);
 
-        const contextText = this.formatContext(context);
+        const contextMessages = this.buildContextMessages(channel.id);
         const startupMessage = await this.ctx.openai.chat({
           messages: [
             {
               role: "system",
               content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
             },
+            ...contextMessages,
             {
               role: "user",
-              content: `Recent conversation context:\n${contextText}\n\nGenerate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.`,
+              content: "Generate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.",
             },
           ],
         });

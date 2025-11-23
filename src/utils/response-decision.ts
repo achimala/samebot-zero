@@ -57,6 +57,13 @@ export class ResponseDecision {
 
     const conversationContext = this.buildConversationContext(context);
     const latestMessageContent = message.content || "(silent)";
+    const contextMessages: Array<{ role: "user" | "system" | "assistant"; content: string }> = [];
+    if (conversationContext) {
+      contextMessages.push({
+        role: "user",
+        content: `Recent conversation context:\n${conversationContext}`,
+      });
+    }
     const decision = await this.options.openai.chatStructured<{
       shouldRespond: boolean;
     }>({
@@ -79,9 +86,10 @@ Do NOT return true if:
 
 Return false when in doubt.`,
         },
+        ...contextMessages,
         {
           role: "user",
-          content: `Recent conversation context with timing:\n\n${conversationContext}\n\nLatest message: ${latestMessageContent}\n\nShould samebot respond to the latest message?`,
+          content: `Latest message: ${latestMessageContent}\n\nShould samebot respond to the latest message?`,
         },
       ],
       schema: {
