@@ -594,7 +594,10 @@ export class AgentLaunchFeature implements Feature {
             const filteredButtons: ButtonBuilder[] = [];
             for (const component of row.components) {
               if (component.type === 2 && component.customId) {
-                if (!component.customId.startsWith("merge-")) {
+                if (
+                  !component.customId.startsWith("merge-") &&
+                  !component.customId.startsWith("followup-")
+                ) {
                   filteredButtons.push(ButtonBuilder.from(component));
                 }
               } else if (component.type === 2) {
