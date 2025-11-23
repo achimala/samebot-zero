@@ -13,6 +13,7 @@ import { ImageOfDayFeature } from "./features/image-of-day";
 import { AgentLaunchFeature } from "./features/agent-launch";
 import { DankResponseFeature } from "./features/dank-response";
 import { UsaCowboyFeature } from "./features/usa-cowboy";
+import { SamebotEmojiFeature } from "./features/samebot-emoji";
 
 async function main() {
   const config = loadConfig();
@@ -43,6 +44,7 @@ async function main() {
     new AgentLaunchFeature(),
     new DankResponseFeature(),
     new UsaCowboyFeature(),
+    new SamebotEmojiFeature(),
   ];
 
   features.forEach((feature) => feature.register(runtime));
