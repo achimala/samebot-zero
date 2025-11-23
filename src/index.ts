@@ -12,6 +12,7 @@ import { ImageCommandFeature } from "./features/image-command";
 import { ImageOfDayFeature } from "./features/image-of-day";
 import { AgentLaunchFeature } from "./features/agent-launch";
 import { DankResponseFeature } from "./features/dank-response";
+import { UsaCowboyFeature } from "./features/usa-cowboy";
 
 async function main() {
   const config = loadConfig();
@@ -41,6 +42,7 @@ async function main() {
     new ImageOfDayFeature(),
     new AgentLaunchFeature(),
     new DankResponseFeature(),
+    new UsaCowboyFeature(),
   ];
 
   features.forEach((feature) => feature.register(runtime));
