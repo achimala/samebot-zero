@@ -22,4 +22,13 @@ export const commandDefinitions = [
         .setDescription("What should the agent do?")
         .setRequired(true),
     ),
+  new SlashCommandBuilder()
+    .setName("emoji")
+    .setDescription("Generate a new :samebot: emoji for this server")
+    .addStringOption((option) =>
+      option
+        .setName("prompt")
+        .setDescription("Describe what the emoji should look like")
+        .setRequired(true),
+    ),
 ].map((builder) => builder.toJSON());
