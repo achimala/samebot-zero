@@ -2,6 +2,7 @@ import type { Message } from "discord.js";
 import type { Logger } from "pino";
 import type { ChatMessage } from "../openai/client";
 import type { OpenAIClient } from "../openai/client";
+import type { ConversationFeature } from "../features/conversation";
 
 export interface TimestampedMessage extends ChatMessage {
   timestamp: number;
@@ -17,6 +18,7 @@ export interface ResponseDecisionOptions {
   openai: OpenAIClient;
   botUserId?: string;
   logger?: Logger;
+  conversation?: ConversationFeature;
 }
 
 export class ResponseDecision {
@@ -55,16 +57,8 @@ export class ResponseDecision {
       return false;
     }
 
-    const conversationContext = this.buildConversationContext(context);
     const latestMessageContent = message.content || "(silent)";
-    const decision = await this.options.openai.chatStructured<{
-      shouldRespond: boolean;
-    }>({
-      model: "gpt-5-mini",
-      messages: [
-        {
-          role: "system",
-          content: `You are analysing a Discord conversation to determine if samebot (a bot) should respond to the latest message.
+    const systemMessage = `You are analysing a Discord conversation to determine if samebot (a bot) should respond to the latest message.
 
 Be CONSERVATIVE. Only return true if:
 - It's clearly obvious the user is talking TO samebot or expecting a response FROM samebot
@@ -77,27 +71,57 @@ Do NOT return true if:
 - It's just general conversation that happens to mention something samebot might know about
 - The message is clearly not directed at samebot
 
-Return false when in doubt.`,
-        },
-        {
-          role: "user",
-          content: `Recent conversation context with timing:\n\n${conversationContext}\n\nLatest message: ${latestMessageContent}\n\nShould samebot respond to the latest message?`,
-        },
-      ],
-      schema: {
-        type: "object",
-        properties: {
-          shouldRespond: {
-            type: "boolean",
-            description: "Whether samebot should respond to the latest message",
+Return false when in doubt.`;
+
+    const decision = this.options.conversation
+      ? await this.options.conversation.chatStructuredWithContext<{
+          shouldRespond: boolean;
+        }>(message.channelId, {
+          systemMessage,
+          userMessage: `Latest message: ${latestMessageContent}\n\nShould samebot respond to the latest message?`,
+          schema: {
+            type: "object",
+            properties: {
+              shouldRespond: {
+                type: "boolean",
+                description: "Whether samebot should respond to the latest message",
+              },
+            },
+            required: ["shouldRespond"],
+            additionalProperties: false,
           },
-        },
-        required: ["shouldRespond"],
-        additionalProperties: false,
-      },
-      schemaName: "responseDecision",
-      schemaDescription: "Decision on whether samebot should respond",
-    });
+          schemaName: "responseDecision",
+          schemaDescription: "Decision on whether samebot should respond",
+          model: "gpt-5-mini",
+        })
+      : await this.options.openai.chatStructured<{
+          shouldRespond: boolean;
+        }>({
+          model: "gpt-5-mini",
+          messages: [
+            {
+              role: "system",
+              content: systemMessage,
+            },
+            {
+              role: "user",
+              content: `Recent conversation context:\n${this.buildConversationContext(context)}\n\nLatest message: ${latestMessageContent}\n\nShould samebot respond to the latest message?`,
+            },
+          ],
+          schema: {
+            type: "object",
+            properties: {
+              shouldRespond: {
+                type: "boolean",
+                description: "Whether samebot should respond to the latest message",
+              },
+            },
+            required: ["shouldRespond"],
+            additionalProperties: false,
+          },
+          schemaName: "responseDecision",
+          schemaDescription: "Decision on whether samebot should respond",
+        });
 
     return decision.match(
       (result) => {

@@ -73,6 +73,78 @@ export class ConversationFeature implements Feature {
     return this.responseDecision.buildConversationContext(context);
   }
 
+  chatWithContext(
+    channelId: string,
+    options: {
+      systemMessage: string;
+      userMessage: string;
+      allowSearch?: boolean;
+    },
+  ) {
+    const context = this.getContext(channelId);
+    const messages: ChatMessage[] = [
+      {
+        role: "system",
+        content: options.systemMessage,
+      },
+    ];
+    if (context && context.history.length > 0) {
+      const contextText = this.formatContext(context);
+      messages.push({
+        role: "user",
+        content: `Recent conversation context:\n${contextText}`,
+      });
+    }
+    messages.push({
+      role: "user",
+      content: options.userMessage,
+    });
+    return this.ctx.openai.chat({
+      messages,
+      allowSearch: options.allowSearch,
+    });
+  }
+
+  chatStructuredWithContext<T>(
+    channelId: string,
+    options: {
+      systemMessage: string;
+      userMessage: string;
+      schema: { [key: string]: unknown };
+      schemaName: string;
+      schemaDescription?: string;
+      allowSearch?: boolean;
+      model?: string;
+    },
+  ) {
+    const context = this.getContext(channelId);
+    const messages: ChatMessage[] = [
+      {
+        role: "system",
+        content: options.systemMessage,
+      },
+    ];
+    if (context && context.history.length > 0) {
+      const contextText = this.formatContext(context);
+      messages.push({
+        role: "user",
+        content: `Recent conversation context:\n${contextText}`,
+      });
+    }
+    messages.push({
+      role: "user",
+      content: options.userMessage,
+    });
+    return this.ctx.openai.chatStructured<T>({
+      messages,
+      schema: options.schema,
+      schemaName: options.schemaName,
+      schemaDescription: options.schemaDescription,
+      allowSearch: options.allowSearch,
+      model: options.model,
+    });
+  }
+
   formatContextWithIds(context: ConversationContext): {
     text: string;
     references: MessageReference[];
@@ -139,6 +211,7 @@ export class ConversationFeature implements Feature {
     this.responseDecision = new ResponseDecision({
       openai: context.openai,
       logger: context.logger,
+      conversation: this,
     });
     context.discord.once("ready", (client) => {
       this.botUserId = client.user.id;
@@ -146,6 +219,7 @@ export class ConversationFeature implements Feature {
         openai: context.openai,
         botUserId: client.user.id,
         logger: context.logger,
+        conversation: this,
       });
       void this.handleStartup();
     });
@@ -214,10 +288,7 @@ export class ConversationFeature implements Feature {
         ? `\n\nAvailable custom emoji: ${emojiList}\nYou can use either standard Unicode emoji or custom emoji names/format.`
         : "";
 
-    const messages: ChatMessage[] = [
-      {
-        role: "system",
-        content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
+    const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
 
 You can perform multiple actions:
 - send_message: Send a text message to the channel
@@ -225,88 +296,85 @@ You can perform multiple actions:
 - generate_image: Generate an image with a prompt
 
 Message references in context:
-${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}`,
-      },
-      {
-        role: "user",
-        content: `Recent conversation:\n${contextWithIds.text}\n\nWhat actions should you take?`,
-      },
-    ];
+${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}`;
 
-    const response = await this.ctx.openai.chatStructured<BotActions>({
-      messages,
-      allowSearch: true,
-      schema: {
-        type: "object",
-        properties: {
-          actions: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                type: {
-                  type: "string",
-                  enum: ["send_message", "react", "generate_image"],
-                  description: "The type of action to perform",
+    const response = await this.chatStructuredWithContext<BotActions>(
+      message.channelId,
+      {
+        systemMessage,
+        userMessage: `Recent conversation:\n${contextWithIds.text}\n\nWhat actions should you take?`,
+        allowSearch: true,
+        schema: {
+          type: "object",
+          properties: {
+            actions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  type: {
+                    type: "string",
+                    enum: ["send_message", "react", "generate_image"],
+                    description: "The type of action to perform",
+                  },
+                  content: {
+                    type: ["string", "null"],
+                    description:
+                      "Message content (required for send_message, null otherwise)",
+                  },
+                  messageId: {
+                    type: ["string", "null"],
+                    description:
+                      "Message ID to react to (required for react, null otherwise)",
+                  },
+                  emoji: {
+                    type: ["string", "null"],
+                    description:
+                      "Emoji to react with. Can be Unicode emoji or custom emoji name/format. (required for react, null otherwise)",
+                  },
+                  prompt: {
+                    type: ["string", "null"],
+                    description:
+                      "Image generation prompt (required for generate_image, null otherwise)",
+                  },
+                  aspectRatio: {
+                    type: ["string", "null"],
+                    enum: [
+                      "1:1",
+                      "2:3",
+                      "3:2",
+                      "3:4",
+                      "4:3",
+                      "9:16",
+                      "16:9",
+                      "21:9",
+                    ],
+                    description:
+                      "Aspect ratio for image generation (optional, defaults to 1:1)",
+                  },
+                  imageSize: {
+                    type: ["string", "null"],
+                    enum: ["1K", "2K", "4K"],
+                    description:
+                      "Image size for image generation (optional, defaults to 1K)",
+                  },
                 },
-                content: {
-                  type: ["string", "null"],
-                  description:
-                    "Message content (required for send_message, null otherwise)",
-                },
-                messageId: {
-                  type: ["string", "null"],
-                  description:
-                    "Message ID to react to (required for react, null otherwise)",
-                },
-                emoji: {
-                  type: ["string", "null"],
-                  description:
-                    "Emoji to react with. Can be Unicode emoji or custom emoji name/format. (required for react, null otherwise)",
-                },
-                prompt: {
-                  type: ["string", "null"],
-                  description:
-                    "Image generation prompt (required for generate_image, null otherwise)",
-                },
-                aspectRatio: {
-                  type: ["string", "null"],
-                  enum: [
-                    "1:1",
-                    "2:3",
-                    "3:2",
-                    "3:4",
-                    "4:3",
-                    "9:16",
-                    "16:9",
-                    "21:9",
-                  ],
-                  description:
-                    "Aspect ratio for image generation (optional, defaults to 1:1)",
-                },
-                imageSize: {
-                  type: ["string", "null"],
-                  enum: ["1K", "2K", "4K"],
-                  description:
-                    "Image size for image generation (optional, defaults to 1K)",
-                },
+                required: [
+                  "type",
+                  "content",
+                  "messageId",
+                  "emoji",
+                  "prompt",
+                  "aspectRatio",
+                  "imageSize",
+                ],
+                additionalProperties: false,
               },
-              required: [
-                "type",
-                "content",
-                "messageId",
-                "emoji",
-                "prompt",
-                "aspectRatio",
-                "imageSize",
-              ],
-              additionalProperties: false,
             },
           },
+          required: ["actions"],
+          additionalProperties: false,
         },
-        required: ["actions"],
-        additionalProperties: false,
-      },
       schemaName: "botActions",
       schemaDescription: "List of actions for the bot to perform",
     });
@@ -726,18 +794,10 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         context.history = context.history.slice(-6);
         this.contexts.set(key, context);
 
-        const contextText = this.formatContext(context);
-        const startupMessage = await this.ctx.openai.chat({
-          messages: [
-            {
-              role: "system",
-              content: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
-            },
-            {
-              role: "user",
-              content: `Recent conversation context:\n${contextText}\n\nGenerate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.`,
-            },
-          ],
+        const startupMessage = await this.chatWithContext(channel.id, {
+          systemMessage: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
+          userMessage:
+            "Generate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.",
         });
 
         await startupMessage.match(
