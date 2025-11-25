@@ -73,6 +73,7 @@ export class EmojiGenerator {
         emojiGuild,
         createdEmoji.toString(),
         emojiName,
+        processedBuffer,
       );
 
       return { emoji: createdEmoji, name: emojiName };
@@ -88,23 +89,30 @@ export class EmojiGenerator {
       const oldestEmoji = emojis.reduce((oldest, current) =>
         oldest.id < current.id ? oldest : current,
       );
+      const deletedName = oldestEmoji.name;
       await oldestEmoji.delete();
       this.ctx.logger.info(
-        { emojiId: oldestEmoji.id, emojiName: oldestEmoji.name },
+        { emojiId: oldestEmoji.id, emojiName: deletedName },
         "Deleted oldest emoji to make room",
       );
+      await this.announcePurgedEmoji(emojiGuild, deletedName);
     }
+  }
+
+  private getGeneralChannel(emojiGuild: Guild) {
+    return emojiGuild.channels.cache.find(
+      (channel) =>
+        channel.type === ChannelType.GuildText && channel.name === "general",
+    );
   }
 
   private async announceNewEmoji(
     emojiGuild: Guild,
     emojiString: string,
     emojiName: string,
+    imageBuffer: Buffer,
   ) {
-    const generalChannel = emojiGuild.channels.cache.find(
-      (channel) =>
-        channel.type === ChannelType.GuildText && channel.name === "general",
-    );
+    const generalChannel = this.getGeneralChannel(emojiGuild);
 
     if (!generalChannel) {
       this.ctx.logger.warn(
@@ -114,8 +122,10 @@ export class EmojiGenerator {
       return;
     }
 
-    const result = await this.ctx.messenger.sendToChannel(
+    const result = await this.ctx.messenger.sendBuffer(
       generalChannel.id,
+      imageBuffer,
+      `${emojiName}.png`,
       `New emoji created: ${emojiString} \`:${emojiName}:\``,
     );
 
@@ -123,6 +133,29 @@ export class EmojiGenerator {
       this.ctx.logger.error(
         { err: result.error, emojiName },
         "Failed to announce new emoji",
+      );
+    }
+  }
+
+  private async announcePurgedEmoji(
+    emojiGuild: Guild,
+    emojiName: string | null,
+  ) {
+    const generalChannel = this.getGeneralChannel(emojiGuild);
+
+    if (!generalChannel) {
+      return;
+    }
+
+    const result = await this.ctx.messenger.sendToChannel(
+      generalChannel.id,
+      `Purged old emoji \`:${emojiName ?? "unknown"}:\` to make room for a new one`,
+    );
+
+    if (result.isErr()) {
+      this.ctx.logger.error(
+        { err: result.error, emojiName },
+        "Failed to announce purged emoji",
       );
     }
   }
