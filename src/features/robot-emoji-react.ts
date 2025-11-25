@@ -6,13 +6,18 @@ import type {
   PartialUser,
 } from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
-import { EmojiGenerator } from "../utils/emoji-generator";
+import { EmojiGenerator, type ReferenceImage } from "../utils/emoji-generator";
 
 const ROBOT_EMOJI = "🤖";
 const PROGRESS_EMOJI = "⏳";
 
 interface EmojiPromptResponse {
   prompt: string;
+}
+
+interface MessageContext {
+  text: string;
+  images: ReferenceImage[];
 }
 
 export class RobotEmojiReactFeature implements Feature {
@@ -104,11 +109,16 @@ export class RobotEmojiReactFeature implements Feature {
 
       const prompt = promptResult.value.prompt;
       this.ctx.logger.info(
-        { prompt, messageId: message.id },
+        { prompt, messageId: message.id, imageCount: context.images.length },
         "Generated emoji prompt",
       );
 
-      const result = await this.emojiGenerator.generate(prompt);
+      const referenceImages =
+        context.images.length > 0 ? context.images : undefined;
+      const result = await this.emojiGenerator.generate(
+        prompt,
+        referenceImages,
+      );
 
       await this.removeProgressEmoji(message, progressReaction);
 
@@ -158,8 +168,9 @@ export class RobotEmojiReactFeature implements Feature {
     }
   }
 
-  private async buildMessageContext(message: Message): Promise<string> {
+  private async buildMessageContext(message: Message): Promise<MessageContext> {
     const lines: string[] = [];
+    const images: ReferenceImage[] = [];
 
     try {
       const channel = message.channel;
@@ -173,6 +184,7 @@ export class RobotEmojiReactFeature implements Feature {
         for (const msg of sortedBefore) {
           if (!msg.author.bot) {
             lines.push(`${msg.author.displayName}: ${msg.content}`);
+            await this.collectImages(msg, images);
           }
         }
       }
@@ -185,29 +197,61 @@ export class RobotEmojiReactFeature implements Feature {
       message.author.displayName ||
       message.author.username;
     lines.push(`[TARGET MESSAGE] ${authorName}: ${message.content}`);
+    await this.collectImages(message, images);
 
-    return lines.join("\n");
+    return { text: lines.join("\n"), images };
   }
 
-  private generateEmojiPrompt(context: string) {
-    return this.ctx.openai.chatStructured<EmojiPromptResponse>({
-      messages: [
-        {
-          role: "system",
-          content: `You are generating a prompt for an emoji image based on conversation context.
+  private async collectImages(message: Message, images: ReferenceImage[]) {
+    for (const attachment of message.attachments.values()) {
+      if (!attachment.contentType?.startsWith("image/")) {
+        continue;
+      }
+      try {
+        const response = await fetch(attachment.url);
+        const arrayBuffer = await response.arrayBuffer();
+        const data = Buffer.from(arrayBuffer).toString("base64");
+        images.push({ data, mimeType: attachment.contentType });
+      } catch (error) {
+        this.ctx.logger.warn(
+          { err: error, url: attachment.url },
+          "Failed to fetch image attachment",
+        );
+      }
+    }
+  }
+
+  private generateEmojiPrompt(context: MessageContext) {
+    const systemContent = `You are generating a prompt for an emoji image based on conversation context.
 The user has reacted with a robot emoji to request a custom emoji be generated.
 
-Analyze the TARGET MESSAGE and its surrounding context to determine what emoji would be most appropriate and fun.
+Analyze the TARGET MESSAGE and its surrounding context (including any images) to determine what emoji would be most appropriate and fun.
 Generate a short, clear image prompt (5-15 words) describing the emoji to create.
 
 The prompt should describe a simple, recognizable image suitable for a Discord emoji.
 Focus on the main subject/object/emotion that would make a good reaction emoji.
-Be creative and contextually relevant - the emoji should feel like a natural reaction to the message.`,
-        },
+Be creative and contextually relevant - the emoji should feel like a natural reaction to the message.
+${context.images.length > 0 ? "If images are present in the context, consider them when generating the emoji prompt." : ""}`;
+
+    const imageUrls = context.images.map(
+      (img) => `data:${img.mimeType};base64,${img.data}`,
+    );
+
+    const userMessage: { role: "user"; content: string; images?: string[] } = {
+      role: "user",
+      content: context.text,
+    };
+    if (imageUrls.length > 0) {
+      userMessage.images = imageUrls;
+    }
+
+    return this.ctx.openai.chatStructured<EmojiPromptResponse>({
+      messages: [
         {
-          role: "user",
-          content: context,
+          role: "system",
+          content: systemContent,
         },
+        userMessage,
       ],
       schema: {
         type: "object",

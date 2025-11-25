@@ -197,6 +197,7 @@ export class OpenAIClient {
 
   generateImage(options: {
     prompt: string;
+    referenceImages?: Array<{ data: string; mimeType: string }>;
     aspectRatio?: ImageAspectRatio;
     imageSize?: ImageResolution;
   }) {
@@ -205,10 +206,20 @@ export class OpenAIClient {
       imageSize: options.imageSize ?? DEFAULT_IMAGE_CONFIG.imageSize,
     };
 
+    const contents: Array<
+      { text: string } | { inlineData: { data: string; mimeType: string } }
+    > = [{ text: options.prompt }];
+
+    if (options.referenceImages) {
+      for (const image of options.referenceImages) {
+        contents.push({ inlineData: image });
+      }
+    }
+
     return ResultAsync.fromPromise(
       this.geminiClient.models.generateContent({
         model: "gemini-3-pro-image-preview",
-        contents: options.prompt,
+        contents,
         config: {
           responseModalities: ["IMAGE"],
           imageConfig,

@@ -1,6 +1,6 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
-import { EmojiGenerator } from "../utils/emoji-generator";
+import { EmojiGenerator, type ReferenceImage } from "../utils/emoji-generator";
 
 export class SamebotEmojiFeature implements Feature {
   private ctx!: RuntimeContext;
@@ -41,7 +41,22 @@ export class SamebotEmojiFeature implements Feature {
     await interaction.deferReply({ ephemeral: true });
 
     const prompt = interaction.options.getString("prompt", true);
-    const result = await this.emojiGenerator.generate(prompt);
+    const referenceAttachment = interaction.options.getAttachment("reference");
+
+    let referenceImages: ReferenceImage[] | undefined;
+    if (
+      referenceAttachment &&
+      referenceAttachment.contentType?.startsWith("image/")
+    ) {
+      const imageData = await this.fetchImageAsBase64(referenceAttachment.url);
+      if (imageData) {
+        referenceImages = [
+          { data: imageData, mimeType: referenceAttachment.contentType },
+        ];
+      }
+    }
+
+    const result = await this.emojiGenerator.generate(prompt, referenceImages);
 
     if (!result) {
       await interaction.editReply({
@@ -53,5 +68,19 @@ export class SamebotEmojiFeature implements Feature {
     await interaction.editReply({
       content: `Generated new :${result.name}: emoji! ${result.emoji}`,
     });
+  }
+
+  private async fetchImageAsBase64(url: string): Promise<string | null> {
+    try {
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer).toString("base64");
+    } catch (error) {
+      this.ctx.logger.warn(
+        { err: error, url },
+        "Failed to fetch reference image",
+      );
+      return null;
+    }
   }
 }

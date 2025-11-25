@@ -30,5 +30,11 @@ export const commandDefinitions = [
         .setName("prompt")
         .setDescription("Describe what the emoji should look like")
         .setRequired(true),
+    )
+    .addAttachmentOption((option) =>
+      option
+        .setName("reference")
+        .setDescription("Optional reference image to base the emoji on")
+        .setRequired(false),
     ),
 ].map((builder) => builder.toJSON());

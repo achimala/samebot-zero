@@ -1,5 +1,4 @@
 import { ChannelType, type Guild, type GuildEmoji } from "discord.js";
-import { okAsync } from "neverthrow";
 import type { RuntimeContext } from "../core/runtime";
 import { processEmojiImage } from "./image-processing";
 
@@ -14,10 +13,18 @@ export interface GeneratedEmoji {
   name: string;
 }
 
+export interface ReferenceImage {
+  data: string;
+  mimeType: string;
+}
+
 export class EmojiGenerator {
   constructor(private readonly ctx: RuntimeContext) {}
 
-  async generate(prompt: string): Promise<GeneratedEmoji | null> {
+  async generate(
+    prompt: string,
+    referenceImages?: ReferenceImage[],
+  ): Promise<GeneratedEmoji | null> {
     const emojiGuild = this.ctx.discord.guilds.cache.get(
       this.ctx.config.emojiGuildId,
     );
@@ -39,11 +46,15 @@ export class EmojiGenerator {
     }
     const emojiName = nameResult.value;
 
-    const imageResult = await this.ctx.openai.generateImage({
-      prompt: `${prompt}, solid bright magenta background (#FF00FF), suitable as a Discord emoji`,
+    const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+      prompt: `${prompt}, solid bright magenta background (#FF00FF), suitable as a Discord emoji. Will be displayed very small, so make things clear and avoid fine details or small text`,
       aspectRatio: "1:1",
       imageSize: "1K",
-    });
+    };
+    if (referenceImages) {
+      imageOptions.referenceImages = referenceImages;
+    }
+    const imageResult = await this.ctx.openai.generateImage(imageOptions);
 
     if (imageResult.isErr()) {
       this.ctx.logger.error(
@@ -161,11 +172,6 @@ export class EmojiGenerator {
   }
 
   private generateEmojiName(prompt: string) {
-    const sanitized = this.sanitizeEmojiName(prompt);
-    if (sanitized.length >= 2 && sanitized.length <= 32) {
-      return okAsync(sanitized);
-    }
-
     return this.ctx.openai
       .chatStructured<EmojiNameResponse>({
         messages: [
