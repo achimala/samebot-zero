@@ -1,6 +1,7 @@
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { type Feature, type RuntimeContext } from "../core/runtime";
+import { EntityResolver } from "../utils/entity-resolver";
 
 const ZONE = "America/Los_Angeles";
 
@@ -20,9 +21,11 @@ const promptResponseJsonSchema = {
 export class ImageOfDayFeature implements Feature {
   private ctx!: RuntimeContext;
   private timer: NodeJS.Timeout | null = null;
+  private entityResolver!: EntityResolver;
 
   register(context: RuntimeContext): void {
     this.ctx = context;
+    this.entityResolver = new EntityResolver(context.supabase, context.logger);
     if (context.discord.isReady()) {
       this.scheduleNext();
     } else {
@@ -55,14 +58,20 @@ export class ImageOfDayFeature implements Feature {
   private async runJob() {
     const today = DateTime.now().setZone(ZONE).toFormat("cccc, LLL dd");
     this.ctx.logger.info({ today }, "Running image of the day");
+
+    const availableEntities = await this.ctx.supabase.listEntityFolders();
+    const entityContext =
+      availableEntities.length > 0
+        ? `\n\nYou can feature these people/entities in your meme (we have reference images for them): ${availableEntities.join(", ")}. Feel free to include them by name in your prompt if it would make the meme funnier.`
+        : "";
+
     const ideation = await this.ctx.openai.chatStructured<
       z.infer<typeof PromptResponseSchema>
     >({
       messages: [
         {
           role: "system",
-          content:
-            "Create a JSON object with 'prompt' and 'caption' for a humorous meme referencing the given date.",
+          content: `Create a JSON object with 'prompt' and 'caption' for a humorous meme referencing the given date.${entityContext}`,
         },
         {
           role: "user",
@@ -90,7 +99,23 @@ export class ImageOfDayFeature implements Feature {
           this.ctx.logger.error("No prompt in structured output");
           return;
         }
-        const imageResult = await this.ctx.openai.generateImage({ prompt });
+
+        let effectivePrompt = prompt;
+        let referenceImages: Array<{ data: string; mimeType: string }> | undefined;
+
+        const resolvedEntity = await this.entityResolver.resolve(prompt);
+        if (resolvedEntity) {
+          effectivePrompt = resolvedEntity.rewrittenPrompt;
+          referenceImages = resolvedEntity.referenceImages;
+        }
+
+        const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+          prompt: effectivePrompt,
+        };
+        if (referenceImages) {
+          imageOptions.referenceImages = referenceImages;
+        }
+        const imageResult = await this.ctx.openai.generateImage(imageOptions);
         await imageResult.match(
           async ({ buffer }) => {
             await this.ctx.messenger

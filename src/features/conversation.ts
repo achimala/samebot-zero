@@ -11,6 +11,7 @@ import {
   ResponseDecision,
   type ConversationContext,
 } from "../utils/response-decision";
+import { EntityResolver } from "../utils/entity-resolver";
 
 const AUTO_REACT_PROBABILITY = 0.15;
 
@@ -63,6 +64,7 @@ export class ConversationFeature implements Feature {
   private botUserId?: string;
   private readonly contexts = new Map<string, ConversationState>();
   private responseDecision!: ResponseDecision;
+  private entityResolver!: EntityResolver;
 
   getContext(channelId: string): ConversationContext | undefined {
     const context = this.contexts.get(channelId);
@@ -231,6 +233,7 @@ export class ConversationFeature implements Feature {
 
   register(context: RuntimeContext): void {
     this.ctx = context;
+    this.entityResolver = new EntityResolver(context.supabase, context.logger);
     this.responseDecision = new ResponseDecision({
       openai: context.openai,
       logger: context.logger,
@@ -319,6 +322,12 @@ export class ConversationFeature implements Feature {
         ? `\n\nAvailable custom emoji (including your generated emojis): ${emojiList}\nYou can use either standard Unicode emoji or custom emoji names/format.`
         : "";
 
+    const availableEntities = await this.ctx.supabase.listEntityFolders();
+    const entityContext =
+      availableEntities.length > 0
+        ? `\n\nWhen generating images, you can feature these people/entities (we have reference images for them): ${availableEntities.join(", ")}. Include them by name in your image prompt to use their likeness.`
+        : "";
+
     const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
 
 You can perform multiple actions:
@@ -327,7 +336,7 @@ You can perform multiple actions:
 - generate_image: Generate an image with a prompt
 
 Message references in context:
-${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}`;
+${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}`;
 
     const response = await this.chatStructuredWithContext<BotActions>(
       message.channelId,
@@ -465,8 +474,22 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
             action.type === "generate_image" &&
             action.prompt !== null
           ) {
+            let effectivePrompt = action.prompt;
+            let referenceImages:
+              | Array<{ data: string; mimeType: string }>
+              | undefined;
+
+            const resolvedEntity = await this.entityResolver.resolve(
+              action.prompt,
+            );
+            if (resolvedEntity) {
+              effectivePrompt = resolvedEntity.rewrittenPrompt;
+              referenceImages = resolvedEntity.referenceImages;
+            }
+
             const imageOptions: {
               prompt: string;
+              referenceImages?: Array<{ data: string; mimeType: string }>;
               aspectRatio?:
                 | "1:1"
                 | "2:3"
@@ -478,8 +501,11 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 | "21:9";
               imageSize?: "1K" | "2K" | "4K";
             } = {
-              prompt: action.prompt,
+              prompt: effectivePrompt,
             };
+            if (referenceImages) {
+              imageOptions.referenceImages = referenceImages;
+            }
             if (action.aspectRatio !== null) {
               imageOptions.aspectRatio = action.aspectRatio;
             }

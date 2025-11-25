@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient as SupabaseClientType } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import type { AppConfig } from "../core/config";
 
@@ -9,8 +9,15 @@ export interface UserGitHubToken {
   updatedAt: string;
 }
 
+export interface StorageFile {
+  name: string;
+  id: string;
+}
+
+const ENTITY_REFERENCES_BUCKET = "reference-images";
+
 export class SupabaseClient {
-  private client;
+  private client: SupabaseClientType;
 
   constructor(
     private readonly config: AppConfig,
@@ -80,5 +87,89 @@ export class SupabaseClient {
       );
       return false;
     }
+  }
+
+  async listEntityFolders(): Promise<string[]> {
+    try {
+      const { data, error } = await this.client.storage
+        .from(ENTITY_REFERENCES_BUCKET)
+        .list("", { limit: 100 });
+
+      if (error) {
+        this.logger.error({ err: error }, "Failed to list entity folders");
+        return [];
+      }
+
+      return data
+        .filter((item) => item.id === null)
+        .map((item) => item.name);
+    } catch (error) {
+      this.logger.error({ err: error }, "Error listing entity folders");
+      return [];
+    }
+  }
+
+  async listFilesInFolder(folderName: string): Promise<StorageFile[]> {
+    try {
+      const { data, error } = await this.client.storage
+        .from(ENTITY_REFERENCES_BUCKET)
+        .list(folderName, { limit: 100 });
+
+      if (error) {
+        this.logger.error(
+          { err: error, folderName },
+          "Failed to list files in folder",
+        );
+        return [];
+      }
+
+      return data
+        .filter((item) => item.id !== null)
+        .map((item) => ({ name: item.name, id: item.id! }));
+    } catch (error) {
+      this.logger.error({ err: error, folderName }, "Error listing files in folder");
+      return [];
+    }
+  }
+
+  async downloadImage(
+    folderName: string,
+    fileName: string,
+  ): Promise<{ data: string; mimeType: string } | null> {
+    try {
+      const path = `${folderName}/${fileName}`;
+      const { data, error } = await this.client.storage
+        .from(ENTITY_REFERENCES_BUCKET)
+        .download(path);
+
+      if (error) {
+        this.logger.error({ err: error, path }, "Failed to download image");
+        return null;
+      }
+
+      const arrayBuffer = await data.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString("base64");
+      const mimeType = this.getMimeTypeFromFileName(fileName);
+
+      return { data: base64, mimeType };
+    } catch (error) {
+      this.logger.error(
+        { err: error, folderName, fileName },
+        "Error downloading image",
+      );
+      return null;
+    }
+  }
+
+  private getMimeTypeFromFileName(fileName: string): string {
+    const extension = fileName.split(".").pop()?.toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+      gif: "image/gif",
+      webp: "image/webp",
+    };
+    return mimeTypes[extension ?? ""] ?? "image/jpeg";
   }
 }

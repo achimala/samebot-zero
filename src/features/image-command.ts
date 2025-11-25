@@ -1,11 +1,14 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
+import { EntityResolver } from "../utils/entity-resolver";
 
 export class ImageCommandFeature implements Feature {
   private ctx!: RuntimeContext;
+  private entityResolver!: EntityResolver;
 
   register(context: RuntimeContext): void {
     this.ctx = context;
+    this.entityResolver = new EntityResolver(context.supabase, context.logger);
     context.discord.on("interactionCreate", (interaction) => {
       if (!interaction.isChatInputCommand()) return;
       if (interaction.commandName !== "img") return;
@@ -16,7 +19,23 @@ export class ImageCommandFeature implements Feature {
   private async handleImage(interaction: ChatInputCommandInteraction) {
     const prompt = interaction.options.getString("prompt", true);
     await interaction.deferReply();
-    const result = await this.ctx.openai.generateImage({ prompt });
+
+    let effectivePrompt = prompt;
+    let referenceImages: Array<{ data: string; mimeType: string }> | undefined;
+
+    const resolvedEntity = await this.entityResolver.resolve(prompt);
+    if (resolvedEntity) {
+      effectivePrompt = resolvedEntity.rewrittenPrompt;
+      referenceImages = resolvedEntity.referenceImages;
+    }
+
+    const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+      prompt: effectivePrompt,
+    };
+    if (referenceImages) {
+      imageOptions.referenceImages = referenceImages;
+    }
+    const result = await this.ctx.openai.generateImage(imageOptions);
     await result.match(
       async ({ buffer }) => {
         await interaction.editReply({

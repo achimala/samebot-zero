@@ -1,6 +1,7 @@
 import { ChannelType, type Guild, type GuildEmoji } from "discord.js";
 import type { RuntimeContext } from "../core/runtime";
 import { processEmojiImage } from "./image-processing";
+import { EntityResolver } from "./entity-resolver";
 
 const MAX_EMOJI_SLOTS = 50;
 
@@ -19,12 +20,26 @@ export interface ReferenceImage {
 }
 
 export class EmojiGenerator {
-  constructor(private readonly ctx: RuntimeContext) {}
+  private readonly entityResolver: EntityResolver;
+
+  constructor(private readonly ctx: RuntimeContext) {
+    this.entityResolver = new EntityResolver(ctx.supabase, ctx.logger);
+  }
 
   async generate(
     prompt: string,
     referenceImages?: ReferenceImage[],
   ): Promise<GeneratedEmoji | null> {
+    let effectivePrompt = prompt;
+    let effectiveReferenceImages = referenceImages;
+
+    if (!referenceImages || referenceImages.length === 0) {
+      const resolvedEntity = await this.entityResolver.resolve(prompt);
+      if (resolvedEntity) {
+        effectivePrompt = resolvedEntity.rewrittenPrompt;
+        effectiveReferenceImages = resolvedEntity.referenceImages;
+      }
+    }
     const emojiGuild = this.ctx.discord.guilds.cache.get(
       this.ctx.config.emojiGuildId,
     );
@@ -47,12 +62,12 @@ export class EmojiGenerator {
     const emojiName = nameResult.value;
 
     const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
-      prompt: `${prompt}, solid bright magenta background (#FF00FF), suitable as a Discord emoji. Will be displayed very small, so make things clear and avoid fine details or small text`,
+      prompt: `${effectivePrompt}, solid bright magenta background (#FF00FF), suitable as a Discord emoji. Will be displayed very small, so make things clear and avoid fine details or small text`,
       aspectRatio: "1:1",
       imageSize: "1K",
     };
-    if (referenceImages) {
-      imageOptions.referenceImages = referenceImages;
+    if (effectiveReferenceImages && effectiveReferenceImages.length > 0) {
+      imageOptions.referenceImages = effectiveReferenceImages;
     }
     const imageResult = await this.ctx.openai.generateImage(imageOptions);
 
