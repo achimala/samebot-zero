@@ -13,6 +13,7 @@ const ConfigSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1, "SUPABASE_ANON_KEY is required"),
   MAIN_CHANNEL_ID: z.string().min(1, "MAIN_CHANNEL_ID is required"),
   IMAGE_OF_DAY_CHANNEL_ID: z.string().optional(),
+  EMOJI_GUILD_ID: z.string().min(1, "EMOJI_GUILD_ID is required"),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .optional(),
@@ -28,6 +29,7 @@ export type AppConfig = {
   supabaseAnonKey: string;
   mainChannelId: string;
   imageOfDayChannelId: string;
+  emojiGuildId: string;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
 };
 
@@ -51,6 +53,7 @@ export function loadConfig(): AppConfig {
     supabaseAnonKey: env.SUPABASE_ANON_KEY,
     mainChannelId: env.MAIN_CHANNEL_ID,
     imageOfDayChannelId: env.IMAGE_OF_DAY_CHANNEL_ID ?? env.MAIN_CHANNEL_ID,
+    emojiGuildId: env.EMOJI_GUILD_ID,
     logLevel: env.LOG_LEVEL ?? "info",
   };
 }
