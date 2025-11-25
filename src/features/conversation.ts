@@ -12,6 +12,8 @@ import {
   type ConversationContext,
 } from "../utils/response-decision";
 
+const AUTO_REACT_PROBABILITY = 0.15;
+
 const PERSONA = `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic British tone.
 you're quintessentially British - use British spellings (colour, realise, organise, etc.), British expressions ("brilliant", "cheers", "bloody hell", "right", "proper", "bit", "quite", "rather"), and British humour (dry wit, understatement, self-deprecation).
 you keep responses extremely short, rarely use emojis, and occasionally swear for comedic effect (British swearing like "bloody", "bugger", "sodding").
@@ -50,6 +52,10 @@ interface BotAction {
 
 interface BotActions {
   actions: BotAction[];
+}
+
+interface AutoReactResponse {
+  emojis: string[];
 }
 
 export class ConversationFeature implements Feature {
@@ -275,7 +281,12 @@ export class ConversationFeature implements Feature {
     context.history = context.history.slice(-12);
     this.contexts.set(key, context);
 
-    if (!(await this.responseDecision.shouldRespond(message, context))) {
+    const shouldRespond = await this.responseDecision.shouldRespond(message, context);
+    
+    if (!shouldRespond) {
+      if (Math.random() < AUTO_REACT_PROBABILITY) {
+        await this.handleAutoReact(message, context);
+      }
       return;
     }
 
@@ -285,7 +296,7 @@ export class ConversationFeature implements Feature {
     const emojiList = this.buildEmojiList();
     const emojiContext =
       emojiList.length > 0
-        ? `\n\nAvailable custom emoji: ${emojiList}\nYou can use either standard Unicode emoji or custom emoji names/format.`
+        ? `\n\nAvailable custom emoji (including your generated emojis): ${emojiList}\nYou can use either standard Unicode emoji or custom emoji names/format.`
         : "";
 
     const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
@@ -666,7 +677,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
     };
   }
 
-  private buildEmojiList(): string {
+  buildEmojiList(): string {
     const emojiList: string[] = [];
     for (const emoji of this.ctx.customEmoji.values()) {
       const format = emoji.animated
@@ -843,5 +854,80 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       content: `\`\`\`\n${payload}\n\`\`\``,
       ephemeral: true,
     });
+  }
+
+  private async handleAutoReact(message: Message, context: ConversationState) {
+    const emojiList = this.buildEmojiList();
+    const contextText = this.formatContext(context);
+
+    const systemMessage = `${PERSONA}
+You are deciding whether to react to a message with emoji(s).
+
+Available custom emoji (including your generated emojis): ${emojiList || "none"}
+You can also use any standard Unicode emoji.
+
+Based on the conversation context and the most recent message, decide if any emoji reactions would be appropriate and fun.
+Return 0 to 3 emojis that would make good reactions. Return an empty array if no reaction feels right.
+For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use the emoji directly (e.g. "😂").`;
+
+    const response = await this.ctx.openai.chatStructured<AutoReactResponse>({
+      messages: [
+        {
+          role: "system",
+          content: systemMessage,
+        },
+        {
+          role: "user",
+          content: `Conversation context:\n${contextText}\n\nMost recent message to potentially react to:\n${message.content}`,
+        },
+      ],
+      schema: {
+        type: "object",
+        properties: {
+          emojis: {
+            type: "array",
+            items: {
+              type: "string",
+              description: "Emoji name (for custom) or Unicode emoji character",
+            },
+            description: "Array of 0-3 emojis to react with",
+          },
+        },
+        required: ["emojis"],
+        additionalProperties: false,
+      },
+      schemaName: "autoReact",
+      schemaDescription: "Emoji reactions to add to message",
+    });
+
+    await response.match(
+      async (result) => {
+        if (result.emojis.length === 0) {
+          return;
+        }
+
+        this.ctx.logger.info(
+          { emojis: result.emojis, messageId: message.id },
+          "Auto-reacting to message",
+        );
+
+        for (const emojiInput of result.emojis.slice(0, 3)) {
+          const emoji = this.resolveEmoji(emojiInput);
+          if (emoji) {
+            try {
+              await message.react(emoji);
+            } catch (error) {
+              this.ctx.logger.warn(
+                { err: error, emoji: emojiInput },
+                "Failed to auto-react",
+              );
+            }
+          }
+        }
+      },
+      async (error) => {
+        this.ctx.logger.warn({ err: error }, "Failed to generate auto-react");
+      },
+    );
   }
 }
