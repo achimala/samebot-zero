@@ -196,7 +196,8 @@ export class ConversationFeature implements Feature {
   }
 
   formatContext(context: ConversationContext): string {
-    return this.responseDecision.buildConversationContext(context);
+    const contextWithIds = this.formatContextWithIds(context);
+    return contextWithIds.text;
   }
 
   chatWithContext(
@@ -342,6 +343,15 @@ export class ConversationFeature implements Feature {
 
     await this.backfillMessages(message.channelId, context, message.id);
 
+    const existingMessageIds = new Set(
+      context.history.map((msg) => msg.messageId),
+    );
+    if (existingMessageIds.has(message.id)) {
+      context.history = context.history.slice(-12);
+      this.contexts.set(key, context);
+      return;
+    }
+
     const enriched = await this.enrichContent(message);
     const formatted = `${
       message.author.displayName || message.author.username
@@ -400,50 +410,13 @@ export class ConversationFeature implements Feature {
 
     await (message.channel as { sendTyping: () => Promise<void> }).sendTyping();
 
-    const contextWithIds = this.formatContextWithIds(context);
-    const emojiList = this.buildEmojiList();
-    const emojiContext =
-      emojiList.length > 0
-        ? `\n\nAvailable custom emoji (including your generated emojis): ${emojiList}\nYou can use either standard Unicode emoji or custom emoji names/format.`
-        : "";
-
-    const availableEntities = await this.ctx.supabase.listEntityFolders();
-    const entityContext =
-      availableEntities.length > 0
-        ? `\n\nWhen generating images, you can feature these people/entities (we have reference images for them): ${availableEntities.join(", ")}. Include them by name in your image prompt to use their likeness.`
-        : "";
-
-    const relevantMemories = await this.ctx.memory.getRelevantMemories(
-      contextWithIds.text,
-      10,
+    const modelContext = await this.buildModelContext(
+      context,
+      message.channelId,
     );
-    const memoryContext =
-      relevantMemories.length > 0
-        ? `\n\nThings you remember about the people in this conversation:\n${relevantMemories.map((m) => `- ${m.content}`).join("\n")}`
-        : "";
-
-    const scrapbookContext = context.lastScrapbookMemoryId
-      ? `\n\nLast mentioned scrapbook memory ID: ${context.lastScrapbookMemoryId} (use this for get_scrapbook_context or delete_scrapbook_memory if someone asks for context or says "bad memory")`
-      : "";
-
-    const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
-
-You have tools available to:
-- react: React to a message with an emoji
-- generate_image: Generate an image with a prompt
-- search_memory: Search your memory for information you don't currently recall
-- get_scrapbook_memory: Get a random memorable quote from the scrapbook
-- search_scrapbook: Search for specific memorable quotes
-- get_scrapbook_context: Get the surrounding conversation for a scrapbook memory
-- delete_scrapbook_memory: Delete a scrapbook memory (use when someone says "bad memory")
-
-Your final text response will be sent as a message to the channel. Use tools for side effects (reactions, images, memory searches) and then provide your text response.
-
-Message references in context (use these IDs when reacting):
-${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}${scrapbookContext}`;
 
     const messageIdMap = new Map<string, Message>();
-    for (const ref of contextWithIds.references) {
+    for (const ref of modelContext.contextWithIds.references) {
       const matchingMessage = await this.findMessageById(
         message.channelId,
         ref.id,
@@ -463,11 +436,11 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
     const messages: Array<ChatMessage | ToolMessage> = [
       {
         role: "system",
-        content: systemMessage,
+        content: modelContext.systemMessage,
       },
       {
         role: "user",
-        content: `Recent conversation:\n${contextWithIds.text}`,
+        content: modelContext.userMessage,
       },
     ];
 
@@ -578,7 +551,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       }
 
       const existingMessageIds = new Set(
-        context.history.map((msg) => msg.timestamp.toString()),
+        context.history.map((msg) => msg.messageId),
       );
 
       const messages = await channel.messages.fetch({
@@ -595,6 +568,10 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       }> = [];
 
       for (const [messageId, msg] of messages) {
+        if (existingMessageIds.has(msg.id)) {
+          continue;
+        }
+
         if (msg.author.bot || msg.system) {
           if (msg.author.id === this.botUserId) {
             const content = msg.content || "(silent)";
@@ -605,11 +582,6 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
               messageId: msg.id,
             });
           }
-          continue;
-        }
-
-        const messageKey = msg.createdTimestamp.toString();
-        if (existingMessageIds.has(messageKey)) {
           continue;
         }
 
@@ -813,6 +785,10 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         lastExtractedTimestamp: 0,
       };
 
+      const existingMessageIds = new Set(
+        context.history.map((msg) => msg.messageId),
+      );
+
       const newMessages: Array<{
         role: "user" | "assistant";
         content: string;
@@ -821,6 +797,10 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       }> = [];
 
       for (const msg of messages.values()) {
+        if (existingMessageIds.has(msg.id)) {
+          continue;
+        }
+
         if (msg.author.bot || msg.system) {
           if (msg.author.id === this.botUserId) {
             newMessages.push({
@@ -885,6 +865,65 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
     }
   }
 
+  private async buildModelContext(
+    context: ConversationState,
+    channelId: string,
+  ): Promise<{
+    systemMessage: string;
+    userMessage: string;
+    contextWithIds: { text: string; references: MessageReference[] };
+  }> {
+    const contextWithIds = this.formatContextWithIds(context);
+    const emojiList = this.buildEmojiList();
+    const emojiContext =
+      emojiList.length > 0
+        ? `\n\nAvailable custom emoji (including your generated emojis): ${emojiList}\nYou can use either standard Unicode emoji or custom emoji names/format.`
+        : "";
+
+    const availableEntities = await this.ctx.supabase.listEntityFolders();
+    const entityContext =
+      availableEntities.length > 0
+        ? `\n\nWhen generating images, you can feature these people/entities (we have reference images for them): ${availableEntities.join(", ")}. Include them by name in your image prompt to use their likeness.`
+        : "";
+
+    const relevantMemories = await this.ctx.memory.getRelevantMemories(
+      contextWithIds.text,
+      10,
+    );
+    const memoryContext =
+      relevantMemories.length > 0
+        ? `\n\nThings you remember about the people in this conversation:\n${relevantMemories.map((m) => `- ${m.content}`).join("\n")}`
+        : "";
+
+    const scrapbookContext = context.lastScrapbookMemoryId
+      ? `\n\nLast mentioned scrapbook memory ID: ${context.lastScrapbookMemoryId} (use this for get_scrapbook_context or delete_scrapbook_memory if someone asks for context or says "bad memory")`
+      : "";
+
+    const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
+
+You have tools available to:
+- react: React to a message with an emoji
+- generate_image: Generate an image with a prompt
+- search_memory: Search your memory for information you don't currently recall
+- get_scrapbook_memory: Get a random memorable quote from the scrapbook
+- search_scrapbook: Search for specific memorable quotes
+- get_scrapbook_context: Get the surrounding conversation for a scrapbook memory
+- delete_scrapbook_memory: Delete a scrapbook memory (use when someone says "bad memory")
+
+Your final text response will be sent as a message to the channel. Use tools for side effects (reactions, images, memory searches) and then provide your text response.
+
+Message references in context (use these IDs when reacting):
+${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}${scrapbookContext}`;
+
+    const userMessage = `Recent conversation:\n${contextWithIds.text}`;
+
+    return {
+      systemMessage,
+      userMessage,
+      contextWithIds,
+    };
+  }
+
   private async handleDebug(interaction: ChatInputCommandInteraction) {
     const key = interaction.channelId || interaction.user.id;
     const context = this.contexts.get(key);
@@ -892,12 +931,16 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       await interaction.reply({ content: "no context yet", ephemeral: true });
       return;
     }
-    const payload = context.history
-      .map((entry) => `${entry.role}: ${entry.content}`)
-      .join("\n")
-      .slice(-1900);
+
+    const modelContext = await this.buildModelContext(
+      context,
+      interaction.channelId || interaction.user.id,
+    );
+
+    const payload = `=== SYSTEM MESSAGE ===\n${modelContext.systemMessage}\n\n=== USER MESSAGE ===\n${modelContext.userMessage}`;
+
     await interaction.reply({
-      content: `\`\`\`\n${payload}\n\`\`\``,
+      content: `\`\`\`\n${payload.slice(-1900)}\n\`\`\``,
       ephemeral: true,
     });
   }
