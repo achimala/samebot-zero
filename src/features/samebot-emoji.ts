@@ -29,15 +29,6 @@ export class SamebotEmojiFeature implements Feature {
       return;
     }
 
-    if (!interaction.memberPermissions?.has("ManageEmojisAndStickers")) {
-      await interaction.reply({
-        content:
-          "You need the 'Manage Emojis and Stickers' permission to use this command",
-        ephemeral: true,
-      });
-      return;
-    }
-
     await interaction.deferReply({ ephemeral: true });
 
     const prompt = interaction.options.getString("prompt", true);
