@@ -1,41 +1,28 @@
 import { describe, it, expect } from "vitest";
-import {
-  ResponseDecision,
-  type ConversationContext,
-} from "./response-decision";
-import type { Message } from "discord.js";
+import { ResponseDecision } from "../agent/response-decision";
+import type { AgentContext, IncomingMessage } from "../agent/types";
 import { OpenAIClient } from "../openai/client";
 import { createLogger } from "../core/logger";
 
-function createMockMessage(options: {
+function createMockIncomingMessage(options: {
   content: string;
   isDm?: boolean;
   mentionsBot?: boolean;
   authorId?: string;
   channelId?: string;
   timestamp?: number;
-}): Message {
-  const botUserId = "bot123";
-  const mentions = new Set<string>();
-  if (options.mentionsBot) {
-    mentions.add(botUserId);
-  }
-
+}): IncomingMessage {
   return {
+    id: `msg_${Date.now()}`,
     content: options.content,
-    author: {
-      id: options.authorId || "user123",
-      bot: false,
-    },
+    authorId: options.authorId || "user123",
+    authorName: "TestUser",
     channelId: options.channelId || "channel123",
-    createdTimestamp: options.timestamp || Date.now(),
-    mentions: {
-      users: {
-        has: (id: string) => mentions.has(id),
-      },
-    },
-    inGuild: () => !options.isDm,
-  } as unknown as Message;
+    timestamp: options.timestamp || Date.now(),
+    images: [],
+    isDm: options.isDm || false,
+    mentionsBotId: options.mentionsBot || false,
+  };
 }
 
 function createOpenAIClient(): OpenAIClient | null {
@@ -73,29 +60,15 @@ describe("ResponseDecision", () => {
         return;
       }
       const decision = new ResponseDecision({ openai: openaiClient });
-      const message = createMockMessage({ content: "hello", isDm: true });
-      const context: ConversationContext = {
+      const message = createMockIncomingMessage({
+        content: "hello",
+        isDm: true,
+      });
+      const context: AgentContext = {
         history: [],
         isDm: true,
+        channelId: "channel123",
       };
-
-      const result = await decision.shouldRespond(message, context);
-
-      expect(result).toBe(true);
-    });
-
-    it("always returns true for non-guild messages", async () => {
-      if (!openaiClient) {
-        return;
-      }
-      const decision = new ResponseDecision({ openai: openaiClient });
-      const message = createMockMessage({ content: "hello", isDm: false });
-      const context: ConversationContext = {
-        history: [],
-        isDm: false,
-      };
-
-      (message.inGuild as unknown as () => boolean) = () => false;
 
       const result = await decision.shouldRespond(message, context);
 
@@ -107,13 +80,14 @@ describe("ResponseDecision", () => {
         return;
       }
       const decision = new ResponseDecision({ openai: openaiClient });
-      const message = createMockMessage({
+      const message = createMockIncomingMessage({
         content: "hey samebot what's up",
         isDm: false,
       });
-      const context: ConversationContext = {
+      const context: AgentContext = {
         history: [],
         isDm: false,
+        channelId: "channel123",
       };
 
       const result = await decision.shouldRespond(message, context);
@@ -126,13 +100,14 @@ describe("ResponseDecision", () => {
         return;
       }
       const decision = new ResponseDecision({ openai: openaiClient });
-      const message = createMockMessage({
+      const message = createMockIncomingMessage({
         content: "Hey SAMEBOT can you help?",
         isDm: false,
       });
-      const context: ConversationContext = {
+      const context: AgentContext = {
         history: [],
         isDm: false,
+        channelId: "channel123",
       };
 
       const result = await decision.shouldRespond(message, context);
@@ -148,14 +123,15 @@ describe("ResponseDecision", () => {
         openai: openaiClient,
         botUserId: "bot123",
       });
-      const message = createMockMessage({
+      const message = createMockIncomingMessage({
         content: "hey @bot123",
         isDm: false,
         mentionsBot: true,
       });
-      const context: ConversationContext = {
+      const context: AgentContext = {
         history: [],
         isDm: false,
+        channelId: "channel123",
       };
 
       const result = await decision.shouldRespond(message, context);
@@ -170,17 +146,29 @@ describe("ResponseDecision", () => {
           openai: openaiClient!,
           botUserId: "bot123",
         });
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "what's the weather like?",
           isDm: false,
         });
         const now = Date.now();
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
-            { role: "user", content: "alice: hello", timestamp: now - 5000 },
-            { role: "assistant", content: "hi there", timestamp: now - 3000 },
+            {
+              id: "msg1",
+              role: "user",
+              content: "hello",
+              author: "alice",
+              timestamp: now - 5000,
+            },
+            {
+              id: "msg2",
+              role: "assistant",
+              content: "hi there",
+              timestamp: now - 3000,
+            },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);
@@ -197,13 +185,31 @@ describe("ResponseDecision", () => {
       }
       const decision = new ResponseDecision({ openai: openaiClient });
       const now = Date.now();
-      const context: ConversationContext = {
+      const context: AgentContext = {
         history: [
-          { role: "user", content: "alice: hello", timestamp: now - 5000 },
-          { role: "assistant", content: "hi there", timestamp: now - 3000 },
-          { role: "user", content: "bob: what's up", timestamp: now - 1000 },
+          {
+            id: "msg1",
+            role: "user",
+            content: "hello",
+            author: "alice",
+            timestamp: now - 5000,
+          },
+          {
+            id: "msg2",
+            role: "assistant",
+            content: "hi there",
+            timestamp: now - 3000,
+          },
+          {
+            id: "msg3",
+            role: "user",
+            content: "what's up",
+            author: "bob",
+            timestamp: now - 1000,
+          },
         ],
         isDm: false,
+        channelId: "channel123",
       };
 
       const result = decision.buildConversationContext(context);
@@ -220,11 +226,18 @@ describe("ResponseDecision", () => {
       }
       const decision = new ResponseDecision({ openai: openaiClient });
       const now = Date.now();
-      const context: ConversationContext = {
+      const context: AgentContext = {
         history: [
-          { role: "user", content: "alice: hello", timestamp: now - 120000 },
+          {
+            id: "msg1",
+            role: "user",
+            content: "hello",
+            author: "alice",
+            timestamp: now - 120000,
+          },
         ],
         isDm: false,
+        channelId: "channel123",
       };
 
       const result = decision.buildConversationContext(context);
@@ -238,11 +251,18 @@ describe("ResponseDecision", () => {
       }
       const decision = new ResponseDecision({ openai: openaiClient });
       const now = Date.now();
-      const context: ConversationContext = {
+      const context: AgentContext = {
         history: [
-          { role: "user", content: "alice: hello", timestamp: now - 7200000 },
+          {
+            id: "msg1",
+            role: "user",
+            content: "hello",
+            author: "alice",
+            timestamp: now - 7200000,
+          },
         ],
         isDm: false,
+        channelId: "channel123",
       };
 
       const result = decision.buildConversationContext(context);
@@ -256,12 +276,25 @@ describe("ResponseDecision", () => {
       }
       const decision = new ResponseDecision({ openai: openaiClient });
       const now = Date.now();
-      const context: ConversationContext = {
+      const context: AgentContext = {
         history: [
-          { role: "user", content: "alice: hello", timestamp: now - 5000 },
-          { role: "user", content: "bob: hi", timestamp: now - 3000 },
+          {
+            id: "msg1",
+            role: "user",
+            content: "hello",
+            author: "alice",
+            timestamp: now - 5000,
+          },
+          {
+            id: "msg2",
+            role: "user",
+            content: "hi",
+            author: "bob",
+            timestamp: now - 3000,
+          },
         ],
         isDm: false,
+        channelId: "channel123",
       };
 
       const result = decision.buildConversationContext(context);
@@ -275,9 +308,10 @@ describe("ResponseDecision", () => {
         return;
       }
       const decision = new ResponseDecision({ openai: openaiClient });
-      const context: ConversationContext = {
+      const context: AgentContext = {
         history: [],
         isDm: false,
+        channelId: "channel123",
       };
 
       const result = decision.buildConversationContext(context);
@@ -295,30 +329,36 @@ describe("ResponseDecision", () => {
           botUserId: "bot123",
         });
         const now = Date.now();
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "can you explain how this works?",
           isDm: false,
           timestamp: now,
         });
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
             {
+              id: "msg1",
               role: "user",
-              content: "alice: hey samebot, I need help",
+              content: "hey samebot, I need help",
+              author: "alice",
               timestamp: now - 10000,
             },
             {
+              id: "msg2",
               role: "assistant",
               content: "hi alice, how can I help?",
               timestamp: now - 8000,
             },
             {
+              id: "msg3",
               role: "user",
-              content: "alice: can you explain how this works?",
+              content: "can you explain how this works?",
+              author: "alice",
               timestamp: now,
             },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);
@@ -336,30 +376,37 @@ describe("ResponseDecision", () => {
           botUserId: "bot123",
         });
         const now = Date.now();
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "yeah that sounds good to me",
           isDm: false,
           timestamp: now,
         });
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
             {
+              id: "msg1",
               role: "user",
-              content: "alice: want to grab lunch?",
+              content: "want to grab lunch?",
+              author: "alice",
               timestamp: now - 15000,
             },
             {
+              id: "msg2",
               role: "user",
-              content: "bob: sure, where?",
+              content: "sure, where?",
+              author: "bob",
               timestamp: now - 12000,
             },
             {
+              id: "msg3",
               role: "user",
-              content: "alice: how about the pizza place",
+              content: "how about the pizza place",
+              author: "alice",
               timestamp: now - 8000,
             },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);
@@ -377,31 +424,37 @@ describe("ResponseDecision", () => {
           botUserId: "bot123",
         });
         const now = Date.now();
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "what do you think about that explanation?",
           isDm: false,
           timestamp: now,
         });
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
             {
+              id: "msg1",
               role: "user",
-              content: "alice: samebot, explain this concept",
+              content: "samebot, explain this concept",
+              author: "alice",
               timestamp: now - 20000,
             },
             {
+              id: "msg2",
               role: "assistant",
               content: "here's the explanation...",
               timestamp: now - 15000,
             },
             {
+              id: "msg3",
               role: "user",
               content:
-                "alice: thanks, one more thing - what do you think about that explanation?",
+                "thanks, one more thing - what do you think about that explanation?",
+              author: "alice",
               timestamp: now,
             },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);
@@ -419,25 +472,30 @@ describe("ResponseDecision", () => {
           botUserId: "bot123",
         });
         const now = Date.now();
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "that's interesting",
           isDm: false,
           timestamp: now,
         });
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
             {
+              id: "msg1",
               role: "user",
-              content: "alice: check out this article",
+              content: "check out this article",
+              author: "alice",
               timestamp: now - 10000,
             },
             {
+              id: "msg2",
               role: "user",
-              content: "bob: wow, that's cool",
+              content: "wow, that's cool",
+              author: "bob",
               timestamp: now - 5000,
             },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);
@@ -455,26 +513,36 @@ describe("ResponseDecision", () => {
           botUserId: "bot123",
         });
         const now = Date.now();
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "hey, what time is it?",
           isDm: false,
           timestamp: now,
         });
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
             {
+              id: "msg1",
               role: "user",
-              content: "alice: hello samebot",
+              content: "hello samebot",
+              author: "alice",
               timestamp: now - 5000,
             },
-            { role: "assistant", content: "hi alice", timestamp: now - 3000 },
             {
+              id: "msg2",
+              role: "assistant",
+              content: "hi alice",
+              timestamp: now - 3000,
+            },
+            {
+              id: "msg3",
               role: "user",
-              content: "alice: hey, what time is it?",
+              content: "hey, what time is it?",
+              author: "alice",
               timestamp: now,
             },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);
@@ -492,21 +560,30 @@ describe("ResponseDecision", () => {
           botUserId: "bot123",
         });
         const now = Date.now();
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "sounds like a plan",
           isDm: false,
           timestamp: now,
         });
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
             {
+              id: "msg1",
               role: "user",
-              content: "alice: let's meet at 3pm",
+              content: "let's meet at 3pm",
+              author: "alice",
               timestamp: now - 10000,
             },
-            { role: "user", content: "bob: perfect", timestamp: now - 5000 },
+            {
+              id: "msg2",
+              role: "user",
+              content: "perfect",
+              author: "bob",
+              timestamp: now - 5000,
+            },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);
@@ -524,25 +601,30 @@ describe("ResponseDecision", () => {
           botUserId: "bot123",
         });
         const now = Date.now();
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "can you help me with something?",
           isDm: false,
           timestamp: now,
         });
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
             {
+              id: "msg1",
               role: "user",
-              content: "alice: hey everyone",
+              content: "hey everyone",
+              author: "alice",
               timestamp: now - 10000,
             },
             {
+              id: "msg2",
               role: "user",
-              content: "bob: what's going on",
+              content: "what's going on",
+              author: "bob",
               timestamp: now - 5000,
             },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);
@@ -560,25 +642,30 @@ describe("ResponseDecision", () => {
           botUserId: "bot123",
         });
         const now = Date.now();
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "what do you think?",
           isDm: false,
           timestamp: now,
         });
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
             {
+              id: "msg1",
               role: "user",
-              content: "alice: check out this article",
+              content: "check out this article",
+              author: "alice",
               timestamp: now - 10000,
             },
             {
+              id: "msg2",
               role: "user",
-              content: "bob: interesting read",
+              content: "interesting read",
+              author: "bob",
               timestamp: now - 5000,
             },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);
@@ -596,17 +683,30 @@ describe("ResponseDecision", () => {
           botUserId: "bot123",
         });
         const now = Date.now();
-        const message = createMockMessage({
+        const message = createMockIncomingMessage({
           content: "hey, what time is it?",
           isDm: false,
           timestamp: now,
         });
-        const context: ConversationContext = {
+        const context: AgentContext = {
           history: [
-            { role: "user", content: "alice: hello", timestamp: now - 5000 },
-            { role: "user", content: "bob: hi there", timestamp: now - 3000 },
+            {
+              id: "msg1",
+              role: "user",
+              content: "hello",
+              author: "alice",
+              timestamp: now - 5000,
+            },
+            {
+              id: "msg2",
+              role: "user",
+              content: "hi there",
+              author: "bob",
+              timestamp: now - 3000,
+            },
           ],
           isDm: false,
+          channelId: "channel123",
         };
 
         const result = await decision.shouldRespond(message, context);

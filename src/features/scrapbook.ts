@@ -81,7 +81,7 @@ export class ScrapbookFeature implements Feature {
       const author = authorMatch?.[1] ?? "unknown";
       const content = authorMatch?.[2] ?? m.content;
       messages.push({
-        id: m.messageId || `msg_${m.timestamp}`,
+        id: m.id,
         author,
         content,
         timestamp: m.timestamp,

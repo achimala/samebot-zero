@@ -1,16 +1,6 @@
-import type { Message } from "discord.js";
 import type { Logger } from "pino";
-import type { ChatMessage, OpenAIClient } from "../openai/client";
-
-export interface TimestampedMessage extends ChatMessage {
-  timestamp: number;
-  messageId?: string;
-}
-
-export interface ConversationContext {
-  history: TimestampedMessage[];
-  isDm: boolean;
-}
+import type { OpenAIClient } from "../openai/client";
+import type { AgentContext, IncomingMessage } from "./types";
 
 export interface ResponseDecisionOptions {
   openai: OpenAIClient;
@@ -22,33 +12,29 @@ export class ResponseDecision {
   constructor(private readonly options: ResponseDecisionOptions) {}
 
   async shouldRespond(
-    message: Message,
-    context: ConversationContext,
+    message: IncomingMessage,
+    context: AgentContext,
   ): Promise<boolean> {
     if (context.isDm) {
-      this.options.logger?.debug("Responding: message is a DM");
+      this.options.logger?.debug({}, "Responding: message is a DM");
       return true;
     }
-    if (!message.inGuild()) {
-      this.options.logger?.debug("Responding: message is not in a guild");
-      return true;
-    }
+
     const content = message.content.toLowerCase();
     if (content.includes("samebot")) {
-      this.options.logger?.debug("Responding: message contains 'samebot'");
+      this.options.logger?.debug({}, "Responding: message contains 'samebot'");
       return true;
     }
-    if (
-      this.options.botUserId &&
-      message.mentions.users.has(this.options.botUserId)
-    ) {
-      this.options.logger?.debug("Responding: bot is mentioned");
+
+    if (message.mentionsBotId) {
+      this.options.logger?.debug({}, "Responding: bot is mentioned");
       return true;
     }
 
     const previousMessage = context.history[context.history.length - 2];
     if (!previousMessage || previousMessage.role !== "assistant") {
       this.options.logger?.debug(
+        {},
         "Not responding: previous message in history is not from samebot",
       );
       return false;
@@ -100,26 +86,28 @@ Return false when in doubt.`;
     });
 
     return decision.match(
-      (result: { shouldRespond: boolean }) => {
+      (result) => {
         if (result.shouldRespond) {
           this.options.logger?.debug(
+            {},
             "Responding: AI determined response is appropriate",
           );
         } else {
           this.options.logger?.debug(
+            {},
             "Not responding: AI determined response is not appropriate",
           );
         }
         return result.shouldRespond;
       },
       () => {
-        this.options.logger?.debug("Not responding: AI decision failed");
+        this.options.logger?.debug({}, "Not responding: AI decision failed");
         return false;
       },
     );
   }
 
-  buildConversationContext(context: ConversationContext): string {
+  buildConversationContext(context: AgentContext): string {
     const now = Date.now();
     const lines: string[] = [];
 
@@ -131,7 +119,12 @@ Return false when in doubt.`;
           : timeAgo < 3600
             ? `${Math.round(timeAgo / 60)}m ago`
             : `${Math.round(timeAgo / 3600)}h ago`;
-      lines.push(`[${timeAgoText}] ${message.role}: ${message.content}`);
+
+      const fullContent = message.author
+        ? `${message.author}: ${message.content}`
+        : message.content;
+
+      lines.push(`[${timeAgoText}] ${message.role}: ${fullContent}`);
     }
 
     return lines.join("\n");
