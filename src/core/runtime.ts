@@ -5,6 +5,7 @@ import type { OpenAIClient } from "../openai/client";
 import type { DiscordMessenger } from "../discord/messenger";
 import type { SupabaseClient } from "../supabase/client";
 import type { ConversationFeature } from "../features/conversation";
+import type { MemoryService } from "../memory/service";
 
 export interface RuntimeContext {
   config: AppConfig;
@@ -13,6 +14,7 @@ export interface RuntimeContext {
   openai: OpenAIClient;
   messenger: DiscordMessenger;
   supabase: SupabaseClient;
+  memory: MemoryService;
   conversation?: ConversationFeature;
   customEmoji: Map<string, GuildEmoji>;
 }

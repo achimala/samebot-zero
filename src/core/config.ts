@@ -10,7 +10,9 @@ const ConfigSchema = z.object({
   GOOGLE_API_KEY: z.string().min(1, "GOOGLE_API_KEY is required"),
   CURSOR_API_KEY: z.string().min(1, "CURSOR_API_KEY is required"),
   SUPABASE_URL: z.string().min(1, "SUPABASE_URL is required"),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
+  SUPABASE_SERVICE_ROLE_KEY: z
+    .string()
+    .min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
   MAIN_CHANNEL_ID: z.string().min(1, "MAIN_CHANNEL_ID is required"),
   IMAGE_OF_DAY_CHANNEL_ID: z.string().optional(),
   EMOJI_GUILD_ID: z.string().min(1, "EMOJI_GUILD_ID is required"),

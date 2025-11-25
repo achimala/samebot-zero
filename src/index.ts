@@ -16,6 +16,8 @@ import { UsaCowboyFeature } from "./features/usa-cowboy";
 import { SamebotEmojiFeature } from "./features/samebot-emoji";
 import { RobotEmojiReactFeature } from "./features/robot-emoji-react";
 import { RememberImageFeature } from "./features/remember-image";
+import { SupabaseMemoryStore } from "./memory/supabase-store";
+import { MemoryService } from "./memory/service";
 
 async function main() {
   const config = loadConfig();
@@ -24,6 +26,9 @@ async function main() {
   const messenger = new DiscordMessenger(gateway.client, logger);
   const openai = new OpenAIClient(config, logger);
   const supabase = new SupabaseClient(config, logger);
+
+  const memoryStore = new SupabaseMemoryStore(supabase.getClient(), logger);
+  const memoryService = new MemoryService(memoryStore, openai, logger);
 
   const conversationFeature = new ConversationFeature();
 
@@ -34,6 +39,7 @@ async function main() {
     messenger,
     openai,
     supabase,
+    memory: memoryService,
     conversation: conversationFeature,
     customEmoji: gateway.getCustomEmoji(),
   };

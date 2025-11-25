@@ -21,8 +21,12 @@ you keep responses extremely short, rarely use emojis, and occasionally swear fo
 always respond very briefly - aim for 5-10 words maximum. be terse and to the point. only expand if explicitly asked for detail.
 speak like a proper Brit - understated, witty, and occasionally self-deprecating.`;
 
+const MEMORY_EXTRACTION_INTERVAL = 6;
+
 interface ConversationState extends ConversationContext {
   lastResponseAt?: number;
+  messagesSinceLastExtraction: number;
+  lastExtractedTimestamp: number;
 }
 
 interface MessageReference {
@@ -33,7 +37,7 @@ interface MessageReference {
 }
 
 interface BotAction {
-  type: "send_message" | "react" | "generate_image";
+  type: "send_message" | "react" | "generate_image" | "search_memory";
   messageId: string | null;
   content: string | null;
   emoji: string | null;
@@ -49,6 +53,7 @@ interface BotAction {
     | "21:9"
     | null;
   imageSize: "1K" | "2K" | "4K" | null;
+  memoryQuery: string | null;
 }
 
 interface BotActions {
@@ -273,6 +278,8 @@ export class ConversationFeature implements Feature {
     let context = this.contexts.get(key) ?? {
       history: [],
       isDm,
+      messagesSinceLastExtraction: 0,
+      lastExtractedTimestamp: 0,
     };
     context.isDm = isDm;
 
@@ -301,6 +308,27 @@ export class ConversationFeature implements Feature {
     context.history = context.history.slice(-12);
     this.contexts.set(key, context);
 
+    const isMainChannel = message.channelId === this.ctx.config.mainChannelId;
+    if (isMainChannel) {
+      context.messagesSinceLastExtraction++;
+      if (context.messagesSinceLastExtraction >= MEMORY_EXTRACTION_INTERVAL) {
+        const newMessages = context.history.filter(
+          (m) =>
+            m.timestamp > context.lastExtractedTimestamp && m.role === "user",
+        );
+        if (newMessages.length > 0) {
+          const batchContext = newMessages.map((m) => m.content).join("\n");
+          context.lastExtractedTimestamp = Date.now();
+          context.messagesSinceLastExtraction = 0;
+          this.contexts.set(key, context);
+
+          void this.ctx.memory.extractFromBatch(batchContext).catch((error) => {
+            this.ctx.logger.error({ err: error }, "Failed to extract memories");
+          });
+        }
+      }
+    }
+
     const shouldRespond = await this.responseDecision.shouldRespond(
       message,
       context,
@@ -328,15 +356,25 @@ export class ConversationFeature implements Feature {
         ? `\n\nWhen generating images, you can feature these people/entities (we have reference images for them): ${availableEntities.join(", ")}. Include them by name in your image prompt to use their likeness.`
         : "";
 
+    const relevantMemories = await this.ctx.memory.getRelevantMemories(
+      contextWithIds.text,
+      10,
+    );
+    const memoryContext =
+      relevantMemories.length > 0
+        ? `\n\nThings you remember about the people in this conversation:\n${relevantMemories.map((m) => `- ${m.content}`).join("\n")}`
+        : "";
+
     const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
 
 You can perform multiple actions:
 - send_message: Send a text message to the channel
 - react: React to a message by referencing its message ID
 - generate_image: Generate an image with a prompt
+- search_memory: Search your memory for information about someone or something you don't currently recall. Use this when asked about something you should know but don't have in your current memory context.
 
 Message references in context:
-${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}`;
+${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}`;
 
     const response = await this.chatStructuredWithContext<BotActions>(
       message.channelId,
@@ -354,7 +392,12 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 properties: {
                   type: {
                     type: "string",
-                    enum: ["send_message", "react", "generate_image"],
+                    enum: [
+                      "send_message",
+                      "react",
+                      "generate_image",
+                      "search_memory",
+                    ],
                     description: "The type of action to perform",
                   },
                   content: {
@@ -398,6 +441,11 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                     description:
                       "Image size for image generation (optional, defaults to 1K)",
                   },
+                  memoryQuery: {
+                    type: ["string", "null"],
+                    description:
+                      "Query to search your memory (required for search_memory, null otherwise)",
+                  },
                 },
                 required: [
                   "type",
@@ -407,6 +455,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                   "prompt",
                   "aspectRatio",
                   "imageSize",
+                  "memoryQuery",
                 ],
                 additionalProperties: false,
               },
@@ -540,6 +589,65 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 );
               },
             );
+          } else if (
+            action.type === "search_memory" &&
+            action.memoryQuery !== null
+          ) {
+            const searchResults = await this.ctx.memory.searchMemories(
+              action.memoryQuery,
+              10,
+            );
+            if (searchResults.length > 0) {
+              const memoryResultsText = searchResults
+                .map((m) => `- ${m.content}`)
+                .join("\n");
+              const followUpResponse = await this.ctx.openai.chat({
+                messages: [
+                  {
+                    role: "system",
+                    content: `${PERSONA}\nRespond in lowercase only. You searched your memory and found:\n${memoryResultsText}\n\nUse this information to respond to the conversation.`,
+                  },
+                  {
+                    role: "user",
+                    content: `Recent conversation:\n${contextWithIds.text}\n\nBased on what you found in your memory, respond appropriately.`,
+                  },
+                ],
+              });
+              await followUpResponse.match(
+                async (responseText) => {
+                  const channel = await this.ctx.discord.channels.fetch(
+                    message.channelId,
+                  );
+                  if (channel && channel.isTextBased() && "send" in channel) {
+                    try {
+                      const sentMessage = await channel.send(responseText);
+                      context.history.push({
+                        role: "assistant",
+                        content: responseText,
+                        timestamp: Date.now(),
+                        messageId: sentMessage.id,
+                      });
+                    } catch (sendError) {
+                      this.ctx.logger.error(
+                        { err: sendError },
+                        "Failed to deliver memory search response",
+                      );
+                    }
+                  }
+                },
+                async (error) => {
+                  this.ctx.logger.error(
+                    { err: error },
+                    "Failed to generate memory search response",
+                  );
+                },
+              );
+            } else {
+              this.ctx.logger.info(
+                { query: action.memoryQuery },
+                "Memory search returned no results",
+              );
+            }
           }
         }
 
@@ -812,6 +920,8 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       let context = this.contexts.get(key) ?? {
         history: [],
         isDm: false,
+        messagesSinceLastExtraction: 0,
+        lastExtractedTimestamp: 0,
       };
 
       const newMessages: Array<{

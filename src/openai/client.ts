@@ -195,6 +195,29 @@ export class OpenAIClient {
     });
   }
 
+  generateEmbedding(text: string) {
+    return ResultAsync.fromPromise(
+      this.geminiClient.models.embedContent({
+        model: "gemini-embedding-001",
+        contents: text,
+      }),
+      (error) => {
+        this.logger.error({ err: error }, "Gemini embedding failed");
+        return Errors.openai(
+          error instanceof Error ? error.message : "Unknown Gemini error",
+        );
+      },
+    ).andThen((response) => {
+      const embedding = response.embeddings?.[0]?.values;
+      if (!embedding || embedding.length === 0) {
+        return err<never, BotError>(
+          Errors.openai("Embedding generation returned no data"),
+        );
+      }
+      return ok(embedding);
+    });
+  }
+
   generateImage(options: {
     prompt: string;
     referenceImages?: Array<{ data: string; mimeType: string }>;
