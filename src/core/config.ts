@@ -10,7 +10,7 @@ const ConfigSchema = z.object({
   GOOGLE_API_KEY: z.string().min(1, "GOOGLE_API_KEY is required"),
   CURSOR_API_KEY: z.string().min(1, "CURSOR_API_KEY is required"),
   SUPABASE_URL: z.string().min(1, "SUPABASE_URL is required"),
-  SUPABASE_ANON_KEY: z.string().min(1, "SUPABASE_ANON_KEY is required"),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
   MAIN_CHANNEL_ID: z.string().min(1, "MAIN_CHANNEL_ID is required"),
   IMAGE_OF_DAY_CHANNEL_ID: z.string().optional(),
   EMOJI_GUILD_ID: z.string().min(1, "EMOJI_GUILD_ID is required"),
@@ -27,7 +27,7 @@ export type AppConfig = {
   googleApiKey: string;
   cursorApiKey: string;
   supabaseUrl: string;
-  supabaseAnonKey: string;
+  supabaseServiceRoleKey: string;
   mainChannelId: string;
   imageOfDayChannelId: string;
   emojiGuildId: string;
@@ -52,7 +52,7 @@ export function loadConfig(): AppConfig {
     googleApiKey: env.GOOGLE_API_KEY,
     cursorApiKey: env.CURSOR_API_KEY,
     supabaseUrl: env.SUPABASE_URL,
-    supabaseAnonKey: env.SUPABASE_ANON_KEY,
+    supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
     mainChannelId: env.MAIN_CHANNEL_ID,
     imageOfDayChannelId: env.IMAGE_OF_DAY_CHANNEL_ID ?? env.MAIN_CHANNEL_ID,
     emojiGuildId: env.EMOJI_GUILD_ID,

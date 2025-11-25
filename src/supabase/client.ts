@@ -26,7 +26,7 @@ export class SupabaseClient {
     private readonly config: AppConfig,
     private readonly logger: Logger,
   ) {
-    this.client = createClient(config.supabaseUrl, config.supabaseAnonKey);
+    this.client = createClient(config.supabaseUrl, config.supabaseServiceRoleKey);
   }
 
   async getGitHubToken(discordUserId: string): Promise<string | null> {
