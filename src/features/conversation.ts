@@ -12,11 +12,13 @@ import type {
   ToolCall,
 } from "../openai/client";
 import type { BotError } from "../core/errors";
+import { Errors } from "../core/errors";
 import {
   ResponseDecision,
   type ConversationContext,
 } from "../utils/response-decision";
 import { EntityResolver } from "../utils/entity-resolver";
+import { ResultAsync } from "neverthrow";
 
 const AUTO_REACT_PROBABILITY = 0.15;
 
@@ -514,23 +516,41 @@ export class ConversationFeature implements Feature {
     }
 
     if (finalResponse && finalResponse.length > 0) {
-      const channel = await this.ctx.discord.channels.fetch(message.channelId);
-      if (channel && channel.isTextBased() && "send" in channel) {
-        try {
-          const sentMessage = await channel.send(finalResponse);
-          context.history.push({
-            role: "assistant",
-            content: finalResponse,
-            timestamp: Date.now(),
-            messageId: sentMessage.id,
+      await ResultAsync.fromPromise(
+        this.ctx.discord.channels.fetch(message.channelId),
+        (error) => {
+          this.ctx.logger.error({ err: error }, "Failed to fetch channel");
+          return Errors.discord("Unable to fetch channel");
+        },
+      )
+        .andThen((channel) => {
+          if (!channel || !channel.isTextBased() || !("send" in channel)) {
+            return ResultAsync.fromSafePromise<Message>(
+              Promise.reject(new Error("Channel does not support sending")),
+            );
+          }
+          const sendPromise = channel.send(finalResponse) as Promise<Message>;
+          return ResultAsync.fromPromise(sendPromise, (error) => {
+            this.ctx.logger.error({ err: error }, "Failed to send message");
+            return Errors.discord("Unable to send message");
           });
-        } catch (sendError) {
-          this.ctx.logger.error(
-            { err: sendError },
-            "Failed to deliver message",
-          );
-        }
-      }
+        })
+        .match(
+          (sentMessage) => {
+            context.history.push({
+              role: "assistant",
+              content: finalResponse,
+              timestamp: Date.now(),
+              messageId: sentMessage.id,
+            });
+          },
+          (sendError) => {
+            this.ctx.logger.error(
+              { err: sendError },
+              "Failed to deliver message",
+            );
+          },
+        );
     }
 
     context.history = context.history.slice(-12);
@@ -542,82 +562,105 @@ export class ConversationFeature implements Feature {
     context: ConversationState,
     beforeMessageId: string,
   ) {
-    try {
-      const channel =
-        this.ctx.discord.channels.cache.get(channelId) ||
-        (await this.ctx.discord.channels.fetch(channelId));
-      if (!channel || !channel.isTextBased()) {
-        return;
-      }
+    const cachedChannel = this.ctx.discord.channels.cache.get(channelId);
+    const channelResult = cachedChannel
+      ? ResultAsync.fromSafePromise(Promise.resolve(cachedChannel))
+      : ResultAsync.fromPromise(
+          this.ctx.discord.channels.fetch(channelId),
+          (error) => {
+            this.ctx.logger.error({ err: error }, "Failed to fetch channel");
+            return Errors.discord("Unable to fetch channel");
+          },
+        );
 
-      const existingMessageIds = new Set(
-        context.history.map((msg) => msg.messageId),
+    await channelResult
+      .andThen((channel) => {
+        if (!channel || !channel.isTextBased()) {
+          return ResultAsync.fromSafePromise<void>(Promise.resolve(undefined));
+        }
+
+        return ResultAsync.fromPromise(
+          channel.messages.fetch({
+            limit: 50,
+            before: beforeMessageId,
+          }),
+          (error) => {
+            this.ctx.logger.error({ err: error }, "Failed to fetch messages");
+            return Errors.discord("Unable to fetch messages");
+          },
+        ).andThen((messages) => {
+          return ResultAsync.fromSafePromise(
+            (async () => {
+              const existingMessageIds = new Set(
+                context.history.map((msg) => msg.messageId),
+              );
+
+              const newMessages: Array<{
+                role: "user" | "assistant";
+                content: string;
+                timestamp: number;
+                messageId: string;
+                images?: string[];
+              }> = [];
+
+              for (const [messageId, msg] of messages) {
+                if (existingMessageIds.has(msg.id)) {
+                  continue;
+                }
+
+                if (msg.author.bot || msg.system) {
+                  if (msg.author.id === this.botUserId) {
+                    const content = msg.content || "(silent)";
+                    newMessages.push({
+                      role: "assistant",
+                      content,
+                      timestamp: msg.createdTimestamp,
+                      messageId: msg.id,
+                    });
+                  }
+                  continue;
+                }
+
+                const enriched = await this.enrichContent(msg);
+                const formatted = `${
+                  msg.author.displayName || msg.author.username
+                }: ${enriched.content}`;
+                const historyEntry: {
+                  role: "user";
+                  content: string;
+                  timestamp: number;
+                  messageId: string;
+                  images?: string[];
+                } = {
+                  role: "user",
+                  content: formatted,
+                  timestamp: msg.createdTimestamp,
+                  messageId: msg.id,
+                };
+                if (enriched.images.length > 0) {
+                  historyEntry.images = enriched.images;
+                }
+                newMessages.push(historyEntry);
+              }
+
+              if (newMessages.length > 0) {
+                context.history.push(...newMessages);
+                context.history.sort((a, b) => a.timestamp - b.timestamp);
+                context.history = context.history.slice(-12);
+              }
+            })(),
+          );
+        });
+      })
+      .match(
+        () => undefined,
+        (error) => {
+          this.ctx.logger.error(
+            { err: error, channelId },
+            "Failed to backfill messages",
+          );
+        },
       );
-
-      const messages = await channel.messages.fetch({
-        limit: 50,
-        before: beforeMessageId,
-      });
-
-      const newMessages: Array<{
-        role: "user" | "assistant";
-        content: string;
-        timestamp: number;
-        messageId: string;
-        images?: string[];
-      }> = [];
-
-      for (const [messageId, msg] of messages) {
-        if (existingMessageIds.has(msg.id)) {
-          continue;
-        }
-
-        if (msg.author.bot || msg.system) {
-          if (msg.author.id === this.botUserId) {
-            const content = msg.content || "(silent)";
-            newMessages.push({
-              role: "assistant",
-              content,
-              timestamp: msg.createdTimestamp,
-              messageId: msg.id,
-            });
-          }
-          continue;
-        }
-
-        const enriched = await this.enrichContent(msg);
-        const formatted = `${
-          msg.author.displayName || msg.author.username
-        }: ${enriched.content}`;
-        const historyEntry: {
-          role: "user";
-          content: string;
-          timestamp: number;
-          messageId: string;
-          images?: string[];
-        } = {
-          role: "user",
-          content: formatted,
-          timestamp: msg.createdTimestamp,
-          messageId: msg.id,
-        };
-        if (enriched.images.length > 0) {
-          historyEntry.images = enriched.images;
-        }
-        newMessages.push(historyEntry);
-      }
-
-      if (newMessages.length > 0) {
-        context.history.push(...newMessages);
-        context.history.sort((a, b) => a.timestamp - b.timestamp);
-        context.history = context.history.slice(-12);
-      }
-    } catch (error) {
-      this.ctx.logger.error(
-        { err: error, channelId },
-        "Failed to backfill messages",
-      );
-    }
   }
 
   private async enrichContent(message: Message): Promise<{
@@ -665,25 +708,43 @@ export class ConversationFeature implements Feature {
         (attachment) => attachment.contentType?.startsWith("image"),
       );
       for (const attachment of imageAttachments) {
-        try {
-          const response = await fetch(attachment.url);
-          if (!response.ok) {
-            this.ctx.logger.warn(
-              { url: attachment.url, status: response.status },
-              "Failed to fetch image",
-            );
-            continue;
-          }
-          const buffer = await response.arrayBuffer();
-          const base64 = Buffer.from(buffer).toString("base64");
-          const mimeType = attachment.contentType || "image/jpeg";
-          images.push(`data:${mimeType};base64,${base64}`);
-        } catch (error) {
+        await ResultAsync.fromPromise(fetch(attachment.url), (error) => {
           this.ctx.logger.error(
             { err: error, url: attachment.url },
-            "Failed to convert image to base64",
+            "Failed to fetch image",
           );
-        }
+          return Errors.discord("Unable to fetch image");
+        })
+          .andThen((response) => {
+            if (!response.ok) {
+              this.ctx.logger.warn(
+                { url: attachment.url, status: response.status },
+                "Failed to fetch image",
+              );
+              return ResultAsync.fromSafePromise<string>(
+                Promise.reject(new Error("Response not ok")),
+              );
+            }
+            return ResultAsync.fromPromise(response.arrayBuffer(), (error) => {
+              this.ctx.logger.error(
+                { err: error, url: attachment.url },
+                "Failed to read image buffer",
+              );
+              return Errors.discord("Unable to read image buffer");
+            }).map((buffer) => {
+              const base64 = Buffer.from(buffer).toString("base64");
+              const mimeType = attachment.contentType || "image/jpeg";
+              return `data:${mimeType};base64,${base64}`;
+            });
+          })
+          .match(
+            (base64Image) => {
+              images.push(base64Image);
+            },
+            () => {
+              // Error already logged
+            },
+          );
       }
     }
 
@@ -733,136 +794,180 @@ export class ConversationFeature implements Feature {
     channelId: string,
     messageId: string,
   ): Promise<Message | null> {
-    try {
-      const channel =
-        this.ctx.discord.channels.cache.get(channelId) ||
-        (await this.ctx.discord.channels.fetch(channelId));
-      if (!channel || !channel.isTextBased()) {
-        return null;
-      }
-      const msg = await channel.messages.fetch(messageId);
-      return msg;
-    } catch (error) {
-      this.ctx.logger.warn(
-        { err: error, channelId, messageId },
-        "Failed to find message by ID",
+    const cachedChannel = this.ctx.discord.channels.cache.get(channelId);
+    const channelResult = cachedChannel
+      ? ResultAsync.fromSafePromise(Promise.resolve(cachedChannel))
+      : ResultAsync.fromPromise(
+          this.ctx.discord.channels.fetch(channelId),
+          (error) => {
+            this.ctx.logger.warn({ err: error }, "Failed to fetch channel");
+            return Errors.discord("Unable to fetch channel");
+          },
+        );
+
+    const result = await channelResult
+      .andThen((channel) => {
+        if (!channel || !channel.isTextBased()) {
+          return ResultAsync.fromSafePromise<Message | null>(
+            Promise.resolve(null),
+          );
+        }
+        return ResultAsync.fromPromise(
+          channel.messages.fetch(messageId),
+          (error) => {
+            this.ctx.logger.warn(
+              { err: error, channelId, messageId },
+              "Failed to find message by ID",
+            );
+            return Errors.discord("Unable to fetch message");
+          },
+        );
+      })
+      .match(
+        (message) => message,
+        () => null,
       );
-    }
-    return null;
+
+    return result;
   }
 
   private async handleStartup() {
     const mainChannelId = this.ctx.config.mainChannelId;
-    const channel =
-      this.ctx.discord.channels.cache.get(mainChannelId) ||
-      (await this.ctx.discord.channels.fetch(mainChannelId));
-
-    if (!channel || !channel.isTextBased() || channel.isDMBased()) {
-      return;
-    }
-
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-
-    try {
-      const messages = await channel.messages.fetch({ limit: 10 });
-      if (messages.size === 0) {
-        return;
-      }
-
-      const mostRecentMessage = Array.from(messages.values())[0];
-      if (
-        !mostRecentMessage ||
-        mostRecentMessage.createdTimestamp < oneDayAgo
-      ) {
-        return;
-      }
-
-      const key = channel.id;
-      let context = this.contexts.get(key) ?? {
-        history: [],
-        isDm: false,
-        messagesSinceLastExtraction: 0,
-        lastExtractedTimestamp: 0,
-      };
-
-      const existingMessageIds = new Set(
-        context.history.map((msg) => msg.messageId),
-      );
-
-      const newMessages: Array<{
-        role: "user" | "assistant";
-        content: string;
-        timestamp: number;
-        messageId: string;
-      }> = [];
-
-      for (const msg of messages.values()) {
-        if (existingMessageIds.has(msg.id)) {
-          continue;
-        }
-
-        if (msg.author.bot || msg.system) {
-          if (msg.author.id === this.botUserId) {
-            newMessages.push({
-              role: "assistant",
-              content: msg.content || "(silent)",
-              timestamp: msg.createdTimestamp,
-              messageId: msg.id,
-            });
-          }
-          continue;
-        }
-
-        const enriched = await this.enrichContent(msg);
-        const formatted = `${
-          msg.author.displayName || msg.author.username
-        }: ${enriched.content}`;
-        newMessages.push({
-          role: "user",
-          content: formatted,
-          timestamp: msg.createdTimestamp,
-          messageId: msg.id,
-        });
-      }
-
-      if (newMessages.length > 0) {
-        context.history.push(...newMessages);
-        context.history.sort((a, b) => a.timestamp - b.timestamp);
-        context.history = context.history.slice(-6);
-        this.contexts.set(key, context);
-
-        const startupMessage = await this.chatWithContext(channel.id, {
-          systemMessage: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
-          userMessage:
-            "Generate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.",
-        });
-
-        await startupMessage.match(
-          async (message) => {
-            await this.ctx.messenger.sendToChannel(channel.id, message).match(
-              async () => undefined,
-              async (error) => {
-                this.ctx.logger.warn(
-                  { err: error, channelId: channel.id },
-                  "Failed to send startup message",
-                );
-              },
-            );
-          },
-          async (error) => {
-            this.ctx.logger.warn(
-              { err: error, channelId: channel.id },
-              "Failed to generate startup message",
-            );
+    const cachedChannel = this.ctx.discord.channels.cache.get(mainChannelId);
+    const channelResult = cachedChannel
+      ? ResultAsync.fromSafePromise(Promise.resolve(cachedChannel))
+      : ResultAsync.fromPromise(
+          this.ctx.discord.channels.fetch(mainChannelId),
+          (error) => {
+            this.ctx.logger.warn({ err: error }, "Failed to fetch channel");
+            return Errors.discord("Unable to fetch channel");
           },
         );
-      }
-    } catch (error) {
-      this.ctx.logger.warn(
-        { err: error, channelId: channel.id },
-        "Failed to process channel for startup message",
+
+    await channelResult
+      .andThen((channel) => {
+        if (!channel || !channel.isTextBased() || channel.isDMBased()) {
+          return ResultAsync.fromSafePromise<void>(Promise.resolve(undefined));
+        }
+
+        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
+        return ResultAsync.fromPromise(
+          channel.messages.fetch({ limit: 10 }),
+          (error) => {
+            this.ctx.logger.warn({ err: error }, "Failed to fetch messages");
+            return Errors.discord("Unable to fetch messages");
+          },
+        ).andThen((messages) => {
+          return ResultAsync.fromSafePromise(
+            (async () => {
+              if (messages.size === 0) {
+                return;
+              }
+
+              const mostRecentMessage = Array.from(messages.values())[0];
+              if (
+                !mostRecentMessage ||
+                mostRecentMessage.createdTimestamp < oneDayAgo
+              ) {
+                return;
+              }
+
+              const key = channel.id;
+              let context = this.contexts.get(key) ?? {
+                history: [],
+                isDm: false,
+                messagesSinceLastExtraction: 0,
+                lastExtractedTimestamp: 0,
+              };
+
+              const existingMessageIds = new Set(
+                context.history.map((msg) => msg.messageId),
+              );
+
+              const newMessages: Array<{
+                role: "user" | "assistant";
+                content: string;
+                timestamp: number;
+                messageId: string;
+              }> = [];
+
+              for (const msg of messages.values()) {
+                if (existingMessageIds.has(msg.id)) {
+                  continue;
+                }
+
+                if (msg.author.bot || msg.system) {
+                  if (msg.author.id === this.botUserId) {
+                    newMessages.push({
+                      role: "assistant",
+                      content: msg.content || "(silent)",
+                      timestamp: msg.createdTimestamp,
+                      messageId: msg.id,
+                    });
+                  }
+                  continue;
+                }
+
+                const enriched = await this.enrichContent(msg);
+                const formatted = `${
+                  msg.author.displayName || msg.author.username
+                }: ${enriched.content}`;
+                newMessages.push({
+                  role: "user",
+                  content: formatted,
+                  timestamp: msg.createdTimestamp,
+                  messageId: msg.id,
+                });
+              }
+
+              if (newMessages.length > 0) {
+                context.history.push(...newMessages);
+                context.history.sort((a, b) => a.timestamp - b.timestamp);
+                context.history = context.history.slice(-6);
+                this.contexts.set(key, context);
+
+                const startupMessage = await this.chatWithContext(channel.id, {
+                  systemMessage: `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
+                  userMessage:
+                    "Generate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.",
+                });
+
+                await startupMessage.match(
+                  async (message) => {
+                    await this.ctx.messenger
+                      .sendToChannel(channel.id, message)
+                      .match(
+                        async () => undefined,
+                        async (error) => {
+                          this.ctx.logger.warn(
+                            { err: error, channelId: channel.id },
+                            "Failed to send startup message",
+                          );
+                        },
+                      );
+                  },
+                  async (error) => {
+                    this.ctx.logger.warn(
+                      { err: error, channelId: channel.id },
+                      "Failed to generate startup message",
+                    );
+                  },
+                );
+              }
+            })(),
+          );
+        });
+      })
+      .match(
+        () => undefined,
+        (error) => {
+          this.ctx.logger.warn(
+            { err: error, channelId: mainChannelId },
+            "Failed to process channel for startup message",
+          );
+        },
       );
-    }
   }
 
   private async buildModelContext(
@@ -960,13 +1065,17 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         const targetMessage = messageIdMap.get(messageId) || message;
         const emoji = this.resolveEmoji(emojiInput);
         if (emoji) {
-          try {
-            await targetMessage.react(emoji);
-            return `Successfully reacted with ${emojiInput}`;
-          } catch (error) {
-            this.ctx.logger.warn({ err: error, emoji }, "Failed to react");
-            return `Failed to react with ${emojiInput}`;
-          }
+          const reactResult = await ResultAsync.fromPromise(
+            targetMessage.react(emoji),
+            (error) => {
+              this.ctx.logger.warn({ err: error, emoji }, "Failed to react");
+              return Errors.discord("Unable to react");
+            },
+          );
+          return reactResult.match(
+            () => `Successfully reacted with ${emojiInput}`,
+            () => `Failed to react with ${emojiInput}`,
+          );
         }
         return `Could not resolve emoji: ${emojiInput}`;
       }
@@ -1241,14 +1350,16 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
         for (const emojiInput of result.emojis.slice(0, 3)) {
           const emoji = this.resolveEmoji(emojiInput);
           if (emoji) {
-            try {
-              await message.react(emoji);
-            } catch (error) {
+            await ResultAsync.fromPromise(message.react(emoji), (error) => {
               this.ctx.logger.warn(
                 { err: error, emoji: emojiInput },
                 "Failed to auto-react",
               );
-            }
+              return Errors.discord("Unable to react");
+            }).match(
+              () => undefined,
+              () => undefined,
+            );
           }
         }
       },
