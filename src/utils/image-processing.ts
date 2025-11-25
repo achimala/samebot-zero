@@ -20,9 +20,9 @@ export async function processEmojiImage(inputBuffer: Buffer): Promise<Buffer> {
   const channels = info.channels;
 
   for (let i = 0; i < pixels.length; i += channels) {
-    const red = pixels[i];
-    const green = pixels[i + 1];
-    const blue = pixels[i + 2];
+    const red = pixels[i] ?? 0;
+    const green = pixels[i + 1] ?? 0;
+    const blue = pixels[i + 2] ?? 0;
 
     if (isCloseToMagenta(red, green, blue)) {
       pixels[i + 3] = 0;

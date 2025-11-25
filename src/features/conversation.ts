@@ -105,10 +105,13 @@ export class ConversationFeature implements Feature {
       role: "user",
       content: options.userMessage,
     });
-    return this.ctx.openai.chat({
+    const chatOptions: { messages: ChatMessage[]; allowSearch?: boolean } = {
       messages,
-      allowSearch: options.allowSearch,
-    });
+    };
+    if (options.allowSearch !== undefined) {
+      chatOptions.allowSearch = options.allowSearch;
+    }
+    return this.ctx.openai.chat(chatOptions);
   }
 
   chatStructuredWithContext<T>(
@@ -141,14 +144,28 @@ export class ConversationFeature implements Feature {
       role: "user",
       content: options.userMessage,
     });
-    return this.ctx.openai.chatStructured<T>({
+    const chatOptions: {
+      messages: ChatMessage[];
+      schema: { [key: string]: unknown };
+      schemaName: string;
+      schemaDescription?: string;
+      allowSearch?: boolean;
+      model?: string;
+    } = {
       messages,
       schema: options.schema,
       schemaName: options.schemaName,
-      schemaDescription: options.schemaDescription,
-      allowSearch: options.allowSearch,
-      model: options.model,
-    });
+    };
+    if (options.schemaDescription !== undefined) {
+      chatOptions.schemaDescription = options.schemaDescription;
+    }
+    if (options.allowSearch !== undefined) {
+      chatOptions.allowSearch = options.allowSearch;
+    }
+    if (options.model !== undefined) {
+      chatOptions.model = options.model;
+    }
+    return this.ctx.openai.chatStructured<T>(chatOptions);
   }
 
   formatContextWithIds(context: ConversationContext): {
