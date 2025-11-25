@@ -91,13 +91,20 @@ export class DiscordGateway {
 
   private async registerCommands() {
     const rest = new REST({ version: "10" }).setToken(this.config.discordToken);
-    try {
-      await rest.put(Routes.applicationCommands(this.config.discordAppId), {
-        body: commandDefinitions,
-      });
-      this.logger.info("Registered global slash commands");
-    } catch (error) {
-      this.logger.error({ err: error }, "Failed to register slash commands");
+    const guildIds = [this.config.mainGuildId, this.config.emojiGuildId];
+    for (const guildId of guildIds) {
+      try {
+        await rest.put(
+          Routes.applicationGuildCommands(this.config.discordAppId, guildId),
+          { body: commandDefinitions },
+        );
+        this.logger.info({ guildId }, "Registered guild slash commands");
+      } catch (error) {
+        this.logger.error(
+          { err: error, guildId },
+          "Failed to register slash commands",
+        );
+      }
     }
   }
 }
