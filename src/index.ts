@@ -15,6 +15,7 @@ import { DankResponseFeature } from "./features/dank-response";
 import { UsaCowboyFeature } from "./features/usa-cowboy";
 import { SamebotEmojiFeature } from "./features/samebot-emoji";
 import { RobotEmojiReactFeature } from "./features/robot-emoji-react";
+import { RememberImageFeature } from "./features/remember-image";
 
 async function main() {
   const config = loadConfig();
@@ -47,6 +48,7 @@ async function main() {
     new UsaCowboyFeature(),
     new SamebotEmojiFeature(),
     new RobotEmojiReactFeature(),
+    new RememberImageFeature(),
   ];
 
   features.forEach((feature) => feature.register(runtime));

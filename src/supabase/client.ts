@@ -165,6 +165,42 @@ export class SupabaseClient {
     }
   }
 
+  async uploadEntityImage(
+    folderName: string,
+    imageBuffer: Buffer,
+    mimeType: string,
+  ): Promise<{ path: string } | null> {
+    try {
+      const extension = this.getExtensionFromMimeType(mimeType);
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${extension}`;
+      const path = `${folderName}/${fileName}`;
+
+      const { error } = await this.client.storage
+        .from(ENTITY_REFERENCES_BUCKET)
+        .upload(path, imageBuffer, {
+          contentType: mimeType,
+          upsert: false,
+        });
+
+      if (error) {
+        this.logger.error(
+          { err: error, path },
+          "Failed to upload entity image",
+        );
+        return null;
+      }
+
+      this.logger.info({ path, folderName }, "Uploaded entity reference image");
+      return { path };
+    } catch (error) {
+      this.logger.error(
+        { err: error, folderName },
+        "Error uploading entity image",
+      );
+      return null;
+    }
+  }
+
   private getMimeTypeFromFileName(fileName: string): string {
     const extension = fileName.split(".").pop()?.toLowerCase();
     const mimeTypes: Record<string, string> = {
@@ -175,5 +211,15 @@ export class SupabaseClient {
       webp: "image/webp",
     };
     return mimeTypes[extension ?? ""] ?? "image/jpeg";
+  }
+
+  private getExtensionFromMimeType(mimeType: string): string {
+    const extensions: Record<string, string> = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/gif": "gif",
+      "image/webp": "webp",
+    };
+    return extensions[mimeType] ?? "jpg";
   }
 }

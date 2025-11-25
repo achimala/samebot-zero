@@ -37,4 +37,19 @@ export const commandDefinitions = [
         .setDescription("Optional reference image to base the emoji on")
         .setRequired(false),
     ),
+  new SlashCommandBuilder()
+    .setName("rememberimage")
+    .setDescription("Add a reference image for an entity (person, thing, etc.)")
+    .addStringOption((option) =>
+      option
+        .setName("name")
+        .setDescription("Name of the entity (e.g., 'anshu', 'office-cat')")
+        .setRequired(true),
+    )
+    .addAttachmentOption((option) =>
+      option
+        .setName("image")
+        .setDescription("Reference image for this entity")
+        .setRequired(true),
+    ),
 ].map((builder) => builder.toJSON());
