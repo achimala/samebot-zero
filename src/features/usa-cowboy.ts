@@ -50,10 +50,7 @@ export class UsaCowboyFeature implements Feature {
           );
       },
       async (error) => {
-        this.ctx.logger.warn(
-          { err: error },
-          "Failed to generate cowboy",
-        );
+        this.ctx.logger.warn({ err: error }, "Failed to generate cowboy");
       },
     );
   }

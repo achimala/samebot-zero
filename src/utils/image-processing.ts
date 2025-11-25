@@ -53,4 +53,3 @@ function isCloseToMagenta(red: number, green: number, blue: number): boolean {
     blueDiff <= COLOR_TOLERANCE
   );
 }
-

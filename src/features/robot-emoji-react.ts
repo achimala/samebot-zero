@@ -1,4 +1,10 @@
-import type { Message, MessageReaction, PartialMessageReaction, User, PartialUser } from "discord.js";
+import type {
+  Message,
+  MessageReaction,
+  PartialMessageReaction,
+  User,
+  PartialUser,
+} from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import { EmojiGenerator } from "../utils/emoji-generator";
 
@@ -39,7 +45,10 @@ export class RobotEmojiReactFeature implements Feature {
       try {
         reaction = await reaction.fetch();
       } catch (error) {
-        this.ctx.logger.warn({ err: error }, "Failed to fetch partial reaction");
+        this.ctx.logger.warn(
+          { err: error },
+          "Failed to fetch partial reaction",
+        );
         return;
       }
     }
@@ -55,7 +64,10 @@ export class RobotEmojiReactFeature implements Feature {
     }
 
     if (this.inProgress.has(message.id)) {
-      this.ctx.logger.debug({ messageId: message.id }, "Emoji generation already in progress");
+      this.ctx.logger.debug(
+        { messageId: message.id },
+        "Emoji generation already in progress",
+      );
       return;
     }
 
@@ -82,20 +94,29 @@ export class RobotEmojiReactFeature implements Feature {
       const promptResult = await this.generateEmojiPrompt(context);
 
       if (promptResult.isErr()) {
-        this.ctx.logger.error({ err: promptResult.error }, "Failed to generate emoji prompt");
+        this.ctx.logger.error(
+          { err: promptResult.error },
+          "Failed to generate emoji prompt",
+        );
         await this.removeProgressEmoji(message, progressReaction);
         return;
       }
 
       const prompt = promptResult.value.prompt;
-      this.ctx.logger.info({ prompt, messageId: message.id }, "Generated emoji prompt");
+      this.ctx.logger.info(
+        { prompt, messageId: message.id },
+        "Generated emoji prompt",
+      );
 
       const result = await this.emojiGenerator.generate(prompt);
 
       await this.removeProgressEmoji(message, progressReaction);
 
       if (!result) {
-        this.ctx.logger.error({ messageId: message.id }, "Failed to generate emoji");
+        this.ctx.logger.error(
+          { messageId: message.id },
+          "Failed to generate emoji",
+        );
         return;
       }
 
@@ -110,7 +131,10 @@ export class RobotEmojiReactFeature implements Feature {
           "Reacted with generated emoji",
         );
       } catch (error) {
-        this.ctx.logger.error({ err: error }, "Failed to react with generated emoji");
+        this.ctx.logger.error(
+          { err: error },
+          "Failed to react with generated emoji",
+        );
       }
     } catch (error) {
       this.ctx.logger.error({ err: error }, "Error in emoji generation flow");
@@ -126,7 +150,9 @@ export class RobotEmojiReactFeature implements Feature {
       return;
     }
     try {
-      await message.reactions.cache.get(PROGRESS_EMOJI)?.users.remove(this.ctx.discord.user?.id);
+      await message.reactions.cache
+        .get(PROGRESS_EMOJI)
+        ?.users.remove(this.ctx.discord.user?.id);
     } catch (error) {
       this.ctx.logger.warn({ err: error }, "Failed to remove progress emoji");
     }
@@ -155,7 +181,9 @@ export class RobotEmojiReactFeature implements Feature {
     }
 
     const authorName =
-      message.member?.displayName || message.author.displayName || message.author.username;
+      message.member?.displayName ||
+      message.author.displayName ||
+      message.author.username;
     lines.push(`[TARGET MESSAGE] ${authorName}: ${message.content}`);
 
     return lines.join("\n");
@@ -186,7 +214,8 @@ Be creative and contextually relevant - the emoji should feel like a natural rea
         properties: {
           prompt: {
             type: "string",
-            description: "A short image prompt (5-15 words) for the emoji to generate",
+            description:
+              "A short image prompt (5-15 words) for the emoji to generate",
           },
         },
         required: ["prompt"],
@@ -197,4 +226,3 @@ Be creative and contextually relevant - the emoji should feel like a natural rea
     });
   }
 }
-

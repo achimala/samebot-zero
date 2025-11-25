@@ -84,7 +84,8 @@ Return false when in doubt.`;
             properties: {
               shouldRespond: {
                 type: "boolean",
-                description: "Whether samebot should respond to the latest message",
+                description:
+                  "Whether samebot should respond to the latest message",
               },
             },
             required: ["shouldRespond"],
@@ -113,7 +114,8 @@ Return false when in doubt.`;
             properties: {
               shouldRespond: {
                 type: "boolean",
-                description: "Whether samebot should respond to the latest message",
+                description:
+                  "Whether samebot should respond to the latest message",
               },
             },
             required: ["shouldRespond"],

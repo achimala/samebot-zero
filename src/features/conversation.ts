@@ -281,8 +281,11 @@ export class ConversationFeature implements Feature {
     context.history = context.history.slice(-12);
     this.contexts.set(key, context);
 
-    const shouldRespond = await this.responseDecision.shouldRespond(message, context);
-    
+    const shouldRespond = await this.responseDecision.shouldRespond(
+      message,
+      context,
+    );
+
     if (!shouldRespond) {
       if (Math.random() < AUTO_REACT_PROBABILITY) {
         await this.handleAutoReact(message, context);
@@ -386,9 +389,10 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           required: ["actions"],
           additionalProperties: false,
         },
-      schemaName: "botActions",
-      schemaDescription: "List of actions for the bot to perform",
-    });
+        schemaName: "botActions",
+        schemaDescription: "List of actions for the bot to perform",
+      },
+    );
 
     await response.match(
       async (actions) => {
