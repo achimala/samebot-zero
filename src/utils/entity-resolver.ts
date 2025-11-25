@@ -4,7 +4,12 @@ import type { Logger } from "pino";
 import type { ReferenceImage } from "./emoji-generator";
 
 const MAX_REFERENCE_IMAGES_PER_ENTITY = 3;
-const FUSE_THRESHOLD = 0.4;
+const FUSE_THRESHOLD = 0.25;
+
+interface SearchableEntity {
+  searchTerm: string;
+  folderName: string;
+}
 
 export interface ResolvedEntity {
   name: string;
@@ -31,7 +36,10 @@ export class EntityResolver {
       return null;
     }
 
-    const fuse = new Fuse(folders, {
+    const searchableEntities = await this.buildSearchIndex(folders);
+
+    const fuse = new Fuse(searchableEntities, {
+      keys: ["searchTerm"],
       threshold: FUSE_THRESHOLD,
       includeScore: true,
     });
@@ -47,12 +55,13 @@ export class EntityResolver {
       if (results.length > 0) {
         const topResult = results[0]!;
         const score = 1 - (topResult.score ?? 0);
+        const folderName = topResult.item.folderName;
 
-        const existingMatch = matchedEntities.get(topResult.item);
+        const existingMatch = matchedEntities.get(folderName);
         if (!existingMatch || score > existingMatch.score) {
-          matchedEntities.set(topResult.item, {
+          matchedEntities.set(folderName, {
             word,
-            folder: topResult.item,
+            folder: folderName,
             score,
           });
         }
@@ -154,6 +163,23 @@ export class EntityResolver {
       textPrompt,
       referenceImages: allReferenceImages,
     };
+  }
+
+  private async buildSearchIndex(
+    folders: string[],
+  ): Promise<SearchableEntity[]> {
+    const searchableEntities: SearchableEntity[] = [];
+
+    for (const folder of folders) {
+      searchableEntities.push({ searchTerm: folder, folderName: folder });
+
+      const aliases = await this.supabase.getEntityAliases(folder);
+      for (const alias of aliases) {
+        searchableEntities.push({ searchTerm: alias, folderName: folder });
+      }
+    }
+
+    return searchableEntities;
   }
 
   private extractWords(text: string): string[] {

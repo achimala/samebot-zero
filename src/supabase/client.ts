@@ -132,13 +132,41 @@ export class SupabaseClient {
       }
 
       return data
-        .filter((item) => item.id !== null)
+        .filter((item) => item.id !== null && item.name !== "aliases.json")
         .map((item) => ({ name: item.name, id: item.id! }));
     } catch (error) {
       this.logger.error(
         { err: error, folderName },
         "Error listing files in folder",
       );
+      return [];
+    }
+  }
+
+  async getEntityAliases(folderName: string): Promise<string[]> {
+    try {
+      const path = `${folderName}/aliases.json`;
+      const { data, error } = await this.client.storage
+        .from(ENTITY_REFERENCES_BUCKET)
+        .download(path);
+
+      if (error) {
+        return [];
+      }
+
+      const text = await data.text();
+      const parsed = JSON.parse(text);
+
+      if (!Array.isArray(parsed)) {
+        this.logger.warn(
+          { folderName },
+          "aliases.json is not an array, ignoring",
+        );
+        return [];
+      }
+
+      return parsed.filter((item): item is string => typeof item === "string");
+    } catch {
       return [];
     }
   }
