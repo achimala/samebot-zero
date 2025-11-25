@@ -1,4 +1,7 @@
-import { createClient, type SupabaseClient as SupabaseClientType } from "@supabase/supabase-js";
+import {
+  createClient,
+  type SupabaseClient as SupabaseClientType,
+} from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import type { AppConfig } from "../core/config";
 
@@ -100,9 +103,7 @@ export class SupabaseClient {
         return [];
       }
 
-      return data
-        .filter((item) => item.id === null)
-        .map((item) => item.name);
+      return data.filter((item) => item.id === null).map((item) => item.name);
     } catch (error) {
       this.logger.error({ err: error }, "Error listing entity folders");
       return [];
@@ -127,7 +128,10 @@ export class SupabaseClient {
         .filter((item) => item.id !== null)
         .map((item) => ({ name: item.name, id: item.id! }));
     } catch (error) {
-      this.logger.error({ err: error, folderName }, "Error listing files in folder");
+      this.logger.error(
+        { err: error, folderName },
+        "Error listing files in folder",
+      );
       return [];
     }
   }

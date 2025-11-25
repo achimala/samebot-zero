@@ -65,13 +65,23 @@ export class ImageOfDayFeature implements Feature {
         ? `\n\nYou can feature these people/entities in your meme (we have reference images for them): ${availableEntities.join(", ")}. Feel free to include them by name in your prompt if it would make the meme funnier.`
         : "";
 
+    let conversationContext = "";
+    if (this.ctx.conversation) {
+      const context = this.ctx.conversation.getContext(
+        this.ctx.config.imageOfDayChannelId,
+      );
+      if (context && context.history.length > 0) {
+        conversationContext = `\n\nRecent conversation context (use this for inspiration or references):\n${this.ctx.conversation.formatContext(context)}`;
+      }
+    }
+
     const ideation = await this.ctx.openai.chatStructured<
       z.infer<typeof PromptResponseSchema>
     >({
       messages: [
         {
           role: "system",
-          content: `Create a JSON object with 'prompt' and 'caption' for a humorous meme referencing the given date.${entityContext}`,
+          content: `Create a JSON object with 'prompt' and 'caption' for a humorous meme referencing the given date.${entityContext}${conversationContext}`,
         },
         {
           role: "user",
@@ -101,7 +111,9 @@ export class ImageOfDayFeature implements Feature {
         }
 
         let effectivePrompt = prompt;
-        let referenceImages: Array<{ data: string; mimeType: string }> | undefined;
+        let referenceImages:
+          | Array<{ data: string; mimeType: string }>
+          | undefined;
 
         const resolvedEntity = await this.entityResolver.resolve(prompt);
         if (resolvedEntity) {
@@ -109,7 +121,9 @@ export class ImageOfDayFeature implements Feature {
           referenceImages = resolvedEntity.referenceImages;
         }
 
-        const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+        const imageOptions: Parameters<
+          typeof this.ctx.openai.generateImage
+        >[0] = {
           prompt: effectivePrompt,
         };
         if (referenceImages) {

@@ -1,8 +1,10 @@
+import Fuse from "fuse.js";
 import type { SupabaseClient } from "../supabase/client";
 import type { Logger } from "pino";
 import type { ReferenceImage } from "./emoji-generator";
 
 const MAX_REFERENCE_IMAGES = 3;
+const FUSE_THRESHOLD = 0.4;
 
 export interface ResolvedEntity {
   originalName: string;
@@ -23,15 +25,22 @@ export class EntityResolver {
       return null;
     }
 
+    const fuse = new Fuse(folders, {
+      threshold: FUSE_THRESHOLD,
+      includeScore: true,
+    });
+
     const words = this.extractWords(prompt);
     let bestMatch: { word: string; folder: string; score: number } | null =
       null;
 
     for (const word of words) {
-      for (const folder of folders) {
-        const score = this.fuzzyMatchScore(word.toLowerCase(), folder.toLowerCase());
-        if (score > 0.7 && (!bestMatch || score > bestMatch.score)) {
-          bestMatch = { word, folder, score };
+      const results = fuse.search(word);
+      if (results.length > 0) {
+        const topResult = results[0]!;
+        const score = 1 - (topResult.score ?? 0);
+        if (!bestMatch || score > bestMatch.score) {
+          bestMatch = { word, folder: topResult.item, score };
         }
       }
     }
@@ -41,7 +50,11 @@ export class EntityResolver {
     }
 
     this.logger.info(
-      { word: bestMatch.word, folder: bestMatch.folder, score: bestMatch.score },
+      {
+        word: bestMatch.word,
+        folder: bestMatch.folder,
+        score: bestMatch.score,
+      },
       "Matched entity in prompt",
     );
 
@@ -58,7 +71,10 @@ export class EntityResolver {
     const referenceImages: ReferenceImage[] = [];
 
     for (const file of selectedFiles) {
-      const image = await this.supabase.downloadImage(bestMatch.folder, file.name);
+      const image = await this.supabase.downloadImage(
+        bestMatch.folder,
+        file.name,
+      );
       if (image) {
         referenceImages.push(image);
       }
@@ -97,54 +113,6 @@ export class EntityResolver {
     return text.split(/\s+/).filter((word) => word.length >= 2);
   }
 
-  private fuzzyMatchScore(search: string, target: string): number {
-    if (search === target) {
-      return 1.0;
-    }
-
-    if (target.includes(search) || search.includes(target)) {
-      const shorter = Math.min(search.length, target.length);
-      const longer = Math.max(search.length, target.length);
-      return shorter / longer;
-    }
-
-    const distance = this.levenshteinDistance(search, target);
-    const maxLength = Math.max(search.length, target.length);
-    return 1 - distance / maxLength;
-  }
-
-  private levenshteinDistance(stringA: string, stringB: string): number {
-    const lengthA = stringA.length;
-    const lengthB = stringB.length;
-    const matrix: number[][] = Array.from({ length: lengthB + 1 }, () =>
-      Array.from({ length: lengthA + 1 }, () => 0),
-    );
-
-    for (let i = 0; i <= lengthB; i++) {
-      matrix[i]![0] = i;
-    }
-
-    for (let j = 0; j <= lengthA; j++) {
-      matrix[0]![j] = j;
-    }
-
-    for (let i = 1; i <= lengthB; i++) {
-      for (let j = 1; j <= lengthA; j++) {
-        if (stringB.charAt(i - 1) === stringA.charAt(j - 1)) {
-          matrix[i]![j] = matrix[i - 1]![j - 1]!;
-        } else {
-          matrix[i]![j] = Math.min(
-            matrix[i - 1]![j - 1]! + 1,
-            matrix[i]![j - 1]! + 1,
-            matrix[i - 1]![j]! + 1,
-          );
-        }
-      }
-    }
-
-    return matrix[lengthB]![lengthA]!;
-  }
-
   private rewritePrompt(prompt: string, entityName: string): string {
     const regex = new RegExp(`\\b${this.escapeRegex(entityName)}\\b`, "gi");
     return prompt.replace(regex, "this person");
@@ -170,4 +138,3 @@ export class EntityResolver {
     return shuffled.slice(0, count);
   }
 }
-
