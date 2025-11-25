@@ -34,10 +34,11 @@ export class EmojiGenerator {
     let effectiveReferenceImages = referenceImages;
 
     if (!referenceImages || referenceImages.length === 0) {
-      const resolvedEntity = await this.entityResolver.resolve(prompt);
-      if (resolvedEntity) {
-        effectivePrompt = resolvedEntity.rewrittenPrompt;
-        effectiveReferenceImages = resolvedEntity.referenceImages;
+      const resolution = await this.entityResolver.resolve(prompt);
+      if (resolution) {
+        const built = this.entityResolver.buildPromptWithReferences(resolution);
+        effectivePrompt = built.textPrompt;
+        effectiveReferenceImages = built.referenceImages;
       }
     }
     const emojiGuild = this.ctx.discord.guilds.cache.get(

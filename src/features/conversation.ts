@@ -479,12 +479,12 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
               | Array<{ data: string; mimeType: string }>
               | undefined;
 
-            const resolvedEntity = await this.entityResolver.resolve(
-              action.prompt,
-            );
-            if (resolvedEntity) {
-              effectivePrompt = resolvedEntity.rewrittenPrompt;
-              referenceImages = resolvedEntity.referenceImages;
+            const resolution = await this.entityResolver.resolve(action.prompt);
+            if (resolution) {
+              const built =
+                this.entityResolver.buildPromptWithReferences(resolution);
+              effectivePrompt = built.textPrompt;
+              referenceImages = built.referenceImages;
             }
 
             const imageOptions: {

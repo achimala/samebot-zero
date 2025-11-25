@@ -23,10 +23,11 @@ export class ImageCommandFeature implements Feature {
     let effectivePrompt = prompt;
     let referenceImages: Array<{ data: string; mimeType: string }> | undefined;
 
-    const resolvedEntity = await this.entityResolver.resolve(prompt);
-    if (resolvedEntity) {
-      effectivePrompt = resolvedEntity.rewrittenPrompt;
-      referenceImages = resolvedEntity.referenceImages;
+    const resolution = await this.entityResolver.resolve(prompt);
+    if (resolution) {
+      const built = this.entityResolver.buildPromptWithReferences(resolution);
+      effectivePrompt = built.textPrompt;
+      referenceImages = built.referenceImages;
     }
 
     const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
