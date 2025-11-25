@@ -40,7 +40,6 @@ export class ImageCommandFeature implements Feature {
     await result.match(
       async ({ buffer }) => {
         await interaction.editReply({
-          content: `prompt: ${prompt}`,
           files: [
             {
               attachment: buffer,
