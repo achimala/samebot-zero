@@ -1,4 +1,4 @@
-import type { Guild, GuildEmoji } from "discord.js";
+import { ChannelType, type Guild, type GuildEmoji } from "discord.js";
 import { okAsync } from "neverthrow";
 import type { RuntimeContext } from "../core/runtime";
 import { processEmojiImage } from "./image-processing";
@@ -69,6 +69,12 @@ export class EmojiGenerator {
         "Created new emoji",
       );
 
+      await this.announceNewEmoji(
+        emojiGuild,
+        createdEmoji.toString(),
+        emojiName,
+      );
+
       return { emoji: createdEmoji, name: emojiName };
     } catch (error) {
       this.ctx.logger.error({ err: error }, "Failed to create emoji");
@@ -86,6 +92,37 @@ export class EmojiGenerator {
       this.ctx.logger.info(
         { emojiId: oldestEmoji.id, emojiName: oldestEmoji.name },
         "Deleted oldest emoji to make room",
+      );
+    }
+  }
+
+  private async announceNewEmoji(
+    emojiGuild: Guild,
+    emojiString: string,
+    emojiName: string,
+  ) {
+    const generalChannel = emojiGuild.channels.cache.find(
+      (channel) =>
+        channel.type === ChannelType.GuildText && channel.name === "general",
+    );
+
+    if (!generalChannel) {
+      this.ctx.logger.warn(
+        { guildId: emojiGuild.id },
+        "No #general channel found for emoji announcement",
+      );
+      return;
+    }
+
+    const result = await this.ctx.messenger.sendToChannel(
+      generalChannel.id,
+      `New emoji created: ${emojiString} \`:${emojiName}:\``,
+    );
+
+    if (result.isErr()) {
+      this.ctx.logger.error(
+        { err: result.error, emojiName },
+        "Failed to announce new emoji",
       );
     }
   }
