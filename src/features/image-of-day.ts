@@ -23,9 +23,13 @@ export class ImageOfDayFeature implements Feature {
 
   register(context: RuntimeContext): void {
     this.ctx = context;
-    context.discord.once("ready", () => {
+    if (context.discord.isReady()) {
       this.scheduleNext();
-    });
+    } else {
+      context.discord.once("ready", () => {
+        this.scheduleNext();
+      });
+    }
   }
 
   private scheduleNext() {
