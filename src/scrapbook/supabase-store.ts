@@ -106,6 +106,29 @@ export class SupabaseScrapbookStore implements ScrapbookStore {
     return this.rowToMemory(data as ScrapbookRow);
   }
 
+  async getByQuote(quote: string): Promise<ScrapbookMemory | null> {
+    const { data, error } = await this.client
+      .from("scrapbook_memories")
+      .select("*")
+      .eq("key_message", quote)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      this.logger.error(
+        { err: error, quote },
+        "Failed to get scrapbook memory by quote",
+      );
+      throw error;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    return this.rowToMemory(data as ScrapbookRow);
+  }
+
   private rowToMemory(row: ScrapbookRow): ScrapbookMemory {
     return {
       id: row.id,

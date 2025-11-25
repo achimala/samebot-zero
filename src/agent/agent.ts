@@ -120,12 +120,13 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     parameters: {
       type: "object",
       properties: {
-        memoryId: {
+        quote: {
           type: "string",
-          description: "The ID of the scrapbook memory to get context for",
+          description:
+            "The exact quote text from the scrapbook memory to get context for",
         },
       },
-      required: ["memoryId"],
+      required: ["quote"],
       additionalProperties: false,
     },
   },
@@ -136,12 +137,12 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     parameters: {
       type: "object",
       properties: {
-        memoryId: {
+        quote: {
           type: "string",
-          description: "The ID of the scrapbook memory to delete",
+          description: "The exact quote text of the scrapbook memory to delete",
         },
       },
-      required: ["memoryId"],
+      required: ["quote"],
       additionalProperties: false,
     },
   },
@@ -441,10 +442,6 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
         ? `\n\nThings you remember about the people in this conversation:\n${relevantMemories.map((m) => `- ${m.content}`).join("\n")}`
         : "";
 
-    const scrapbookContext = context.lastScrapbookMemoryId
-      ? `\n\nLast mentioned scrapbook memory ID: ${context.lastScrapbookMemoryId} (use this for get_scrapbook_context or delete_scrapbook_memory if someone asks for context or says "bad memory")`
-      : "";
-
     const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
 
 You have tools available to:
@@ -461,7 +458,7 @@ IMPORTANT: The scrapbook tools (get_scrapbook_memory, search_scrapbook, get_scra
 Your final text response will be sent as a message to the channel. An empty response sends nothing - use this when your tool calls have already provided the response (like after scrapbook calls). Unless asked to do so, do not add additional commentary after calling the scrapbook tools that auto-post for you, just provide an empty response after those.
 
 Message references in context (use these IDs when reacting):
-${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}${scrapbookContext}`;
+${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}`;
 
     const userMessage = `Recent conversation:\n${contextWithIds.text}`;
 
@@ -599,7 +596,6 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       case "get_scrapbook_memory": {
         const memory = await this.scrapbook.getRandomMemory();
         if (memory) {
-          agentContext.lastScrapbookMemoryId = memory.id;
           const formatted = this.formatScrapbookMemory(memory);
           const sendResult = await this.adapter.sendMessage(
             channelId,
@@ -618,10 +614,6 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         const query = toolCall.arguments.query as string;
         const results = await this.scrapbook.searchMemories(query, 5);
         if (results.length > 0) {
-          const firstResult = results[0];
-          if (firstResult) {
-            agentContext.lastScrapbookMemoryId = firstResult.id;
-          }
           const formatted = this.formatScrapbookSearchResults(results);
           const sendResult = await this.adapter.sendMessage(
             channelId,
@@ -640,8 +632,8 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       }
 
       case "get_scrapbook_context": {
-        const memoryId = toolCall.arguments.memoryId as string;
-        const memory = await this.scrapbook.getMemoryById(memoryId);
+        const quote = toolCall.arguments.quote as string;
+        const memory = await this.scrapbook.getMemoryByQuote(quote);
         if (memory) {
           const formatted = this.formatScrapbookContext(memory);
           const sendResult = await this.adapter.sendMessage(
@@ -658,12 +650,16 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       }
 
       case "delete_scrapbook_memory": {
-        const memoryId = toolCall.arguments.memoryId as string;
-        const success = await this.scrapbook.deleteMemory(memoryId);
-        if (success) {
-          return "Deleted the scrapbook memory.";
+        const quote = toolCall.arguments.quote as string;
+        const memory = await this.scrapbook.getMemoryByQuote(quote);
+        if (memory) {
+          const success = await this.scrapbook.deleteMemory(memory.id);
+          if (success) {
+            return "Deleted the scrapbook memory.";
+          }
+          return "Found but could not delete that scrapbook memory.";
         }
-        return "Could not delete that scrapbook memory.";
+        return "Could not find that scrapbook memory.";
       }
 
       default:

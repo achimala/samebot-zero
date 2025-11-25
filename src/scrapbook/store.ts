@@ -18,4 +18,5 @@ export interface ScrapbookStore {
   getRandom(): Promise<ScrapbookMemory | null>;
   search(query: string, limit?: number): Promise<ScrapbookMemory[]>;
   getById(id: string): Promise<ScrapbookMemory | null>;
+  getByQuote(quote: string): Promise<ScrapbookMemory | null>;
 }

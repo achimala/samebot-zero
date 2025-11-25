@@ -203,6 +203,18 @@ Do NOT select messages that are:
     }
   }
 
+  async getMemoryByQuote(quote: string): Promise<ScrapbookMemory | null> {
+    try {
+      return await this.store.getByQuote(quote);
+    } catch (error) {
+      this.logger.error(
+        { err: error, quote },
+        "Failed to get scrapbook memory by quote",
+      );
+      return null;
+    }
+  }
+
   formatContext(memory: ScrapbookMemory): string {
     return memory.context.map((m) => `<${m.author}> ${m.content}`).join("\n");
   }

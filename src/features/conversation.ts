@@ -18,7 +18,6 @@ interface ConversationState {
   history: AgentMessage[];
   isDm: boolean;
   channelId: string;
-  lastScrapbookMemoryId?: string;
   lastResponseAt?: number;
   messagesSinceLastExtraction: number;
   lastExtractedTimestamp: number;
@@ -38,15 +37,11 @@ export class ConversationFeature implements Feature {
     if (!context) {
       return undefined;
     }
-    const agentContext: AgentContext = {
+    return {
       history: context.history,
       isDm: context.isDm,
       channelId: context.channelId,
     };
-    if (context.lastScrapbookMemoryId !== undefined) {
-      agentContext.lastScrapbookMemoryId = context.lastScrapbookMemoryId;
-    }
-    return agentContext;
   }
 
   formatContext(context: AgentContext): string {
@@ -87,17 +82,13 @@ export class ConversationFeature implements Feature {
     const results: Array<{ channelId: string; context: AgentContext }> = [];
     for (const [channelId, state] of this.contexts.entries()) {
       if (state.history.length > 0) {
-        const agentContext: AgentContext = {
-          history: state.history,
-          isDm: state.isDm,
-          channelId: state.channelId,
-        };
-        if (state.lastScrapbookMemoryId !== undefined) {
-          agentContext.lastScrapbookMemoryId = state.lastScrapbookMemoryId;
-        }
         results.push({
           channelId,
-          context: agentContext,
+          context: {
+            history: state.history,
+            isDm: state.isDm,
+            channelId: state.channelId,
+          },
         });
       }
     }
@@ -324,15 +315,11 @@ export class ConversationFeature implements Feature {
   }
 
   private toAgentContext(state: ConversationState): AgentContext {
-    const agentContext: AgentContext = {
+    return {
       history: state.history,
       isDm: state.isDm,
       channelId: state.channelId,
     };
-    if (state.lastScrapbookMemoryId !== undefined) {
-      agentContext.lastScrapbookMemoryId = state.lastScrapbookMemoryId;
-    }
-    return agentContext;
   }
 
   private async handleStartup() {

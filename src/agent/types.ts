@@ -13,7 +13,6 @@ export interface AgentContext {
   history: AgentMessage[];
   isDm: boolean;
   channelId: string;
-  lastScrapbookMemoryId?: string;
 }
 
 export interface IncomingMessage {
