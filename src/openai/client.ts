@@ -31,7 +31,7 @@ export type ToolCall = {
 
 export type ToolStepResult =
   | { done: true; text: string }
-  | { done: false; toolCalls: ToolCall[] };
+  | { done: false; toolCalls: ToolCall[]; responseId: string };
 
 const DEFAULT_IMAGE_CONFIG = {
   aspectRatio: "1:1" as const,
@@ -221,6 +221,7 @@ export class OpenAIClient {
     messages: Array<ChatMessage | ToolMessage>;
     tools: ToolDefinition[];
     allowSearch?: boolean;
+    previousResponseId?: string;
   }) {
     const input: OpenAI.Responses.ResponseInput = options.messages.map(
       (message) => {
@@ -256,11 +257,20 @@ export class OpenAIClient {
       tools.push({ type: "web_search" as const });
     }
 
-    const params = {
+    const params: {
+      model: string;
+      input: OpenAI.Responses.ResponseInput;
+      tools: typeof tools;
+      previous_response_id?: string;
+    } = {
       model: "gpt-5.1",
       input,
       tools,
     };
+
+    if (options.previousResponseId) {
+      params.previous_response_id = options.previousResponseId;
+    }
 
     this.logger.debug(
       {
@@ -268,6 +278,7 @@ export class OpenAIClient {
         messageCount: options.messages.length,
         tools: options.tools.map((t) => t.name),
         allowSearch: options.allowSearch,
+        previousResponseId: options.previousResponseId,
       },
       "OpenAI tool step input",
     );
@@ -319,7 +330,7 @@ export class OpenAIClient {
     }
 
     if (toolCalls.length > 0) {
-      return { done: false, toolCalls };
+      return { done: false, toolCalls, responseId: response.id };
     }
 
     const text = textChunks.join("\n").trim();
@@ -331,6 +342,9 @@ export class OpenAIClient {
       this.geminiClient.models.embedContent({
         model: "gemini-embedding-001",
         contents: text,
+        config: {
+          outputDimensionality: 768,
+        },
       }),
       (error) => {
         this.logger.error({ err: error }, "Gemini embedding failed");

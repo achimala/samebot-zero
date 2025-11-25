@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import { ResultAsync } from "neverthrow";
 import type { Memory, MemoryStore } from "./store";
 import type { OpenAIClient } from "../openai/client";
 
@@ -111,7 +112,21 @@ If nothing memorable is said, return an empty array. Be conservative, it's perfe
     }
 
     const embedding = embeddingResult.value;
-    const similarMemories = await this.store.findSimilar(embedding, 10);
+
+    const findResult = await ResultAsync.fromPromise(
+      this.store.findSimilar(embedding, 10),
+      (error) => error,
+    );
+
+    if (findResult.isErr()) {
+      this.logger.error(
+        { err: findResult.error },
+        "Failed to find similar memories",
+      );
+      return;
+    }
+
+    const similarMemories = findResult.value;
 
     if (similarMemories.length === 0) {
       await this.createMemory(observation, embedding);
@@ -268,12 +283,20 @@ Analyze how the new observation relates to these memories.`;
       return [];
     }
 
-    const similarMemories = await this.store.findSimilar(
-      embeddingResult.value,
-      topK * 2,
+    const findResult = await ResultAsync.fromPromise(
+      this.store.findSimilar(embeddingResult.value, topK * 2),
+      (error) => error,
     );
 
-    const memoriesWithEffectiveStrength = similarMemories.map((memory) => ({
+    if (findResult.isErr()) {
+      this.logger.error(
+        { err: findResult.error },
+        "Failed to find similar memories",
+      );
+      return [];
+    }
+
+    const memoriesWithEffectiveStrength = findResult.value.map((memory) => ({
       memory,
       effectiveStrength: computeEffectiveStrength(memory),
     }));
@@ -299,8 +322,20 @@ Analyze how the new observation relates to these memories.`;
       return [];
     }
 
-    const results = await this.store.findSimilar(embeddingResult.value, topK);
-    return results.filter(
+    const findResult = await ResultAsync.fromPromise(
+      this.store.findSimilar(embeddingResult.value, topK),
+      (error) => error,
+    );
+
+    if (findResult.isErr()) {
+      this.logger.error(
+        { err: findResult.error },
+        "Failed to find similar memories",
+      );
+      return [];
+    }
+
+    return findResult.value.filter(
       (memory) => computeEffectiveStrength(memory) >= PURGE_THRESHOLD,
     );
   }

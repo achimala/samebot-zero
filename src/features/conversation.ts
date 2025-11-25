@@ -63,17 +63,17 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
           description: "A detailed description of the image to generate",
         },
         aspectRatio: {
-          type: "string",
+          type: ["string", "null"],
           enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"],
           description: "The aspect ratio for the image (defaults to 1:1)",
         },
         imageSize: {
-          type: "string",
+          type: ["string", "null"],
           enum: ["1K", "2K", "4K"],
           description: "The resolution of the image (defaults to 1K)",
         },
       },
-      required: ["prompt"],
+      required: ["prompt", "aspectRatio", "imageSize"],
       additionalProperties: false,
     },
   },
@@ -405,12 +405,14 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
     ];
 
     let finalResponse: string | null = null;
+    let previousResponseId: string | undefined;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       const result = await this.ctx.openai.chatWithToolsStep({
         messages,
         tools: TOOL_DEFINITIONS,
         allowSearch: true,
+        previousResponseId,
       });
 
       const stepResult = result.match(
@@ -442,6 +444,8 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         finalResponse = stepResult.text;
         break;
       }
+
+      previousResponseId = stepResult.responseId;
 
       this.ctx.logger.info(
         { toolCalls: stepResult.toolCalls, iteration },
