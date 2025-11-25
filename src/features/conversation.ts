@@ -96,7 +96,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "get_scrapbook_memory",
     description:
-      "Get a random memorable quote from the scrapbook. Use this when someone asks for a memory, story, or something from the scrapbook.",
+      "Get a random memorable quote from the scrapbook. POSTS DIRECTLY TO CHANNEL - the quote is immediately visible to everyone. Use this when someone asks for a memory, story, or something from the scrapbook.",
     parameters: {
       type: "object",
       properties: {},
@@ -106,7 +106,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "search_scrapbook",
     description:
-      "Search the scrapbook for memorable quotes matching a query. Use this when someone asks 'remember when...' or wants to find a specific old quote.",
+      "Search the scrapbook for memorable quotes matching a query. POSTS DIRECTLY TO CHANNEL - results are immediately visible to everyone. Use this when someone asks 'remember when...' or wants to find a specific old quote.",
     parameters: {
       type: "object",
       properties: {
@@ -122,7 +122,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "get_scrapbook_context",
     description:
-      "Get the surrounding conversation context for a scrapbook memory. Use this when someone asks for context, says 'what?', 'huh?', or reacts with confusion to a scrapbook quote.",
+      "Get the surrounding conversation context for a scrapbook memory. POSTS DIRECTLY TO CHANNEL - context is immediately visible to everyone. Use this when someone asks for context, says 'what?', 'huh?', or reacts with confusion to a scrapbook quote.",
     parameters: {
       type: "object",
       properties: {
@@ -171,11 +171,6 @@ interface ToolExecutionContext {
   message: Message;
   channelId: string;
   messageIdMap: Map<string, Message>;
-}
-
-interface ToolResult {
-  toolResponseText: string;
-  finalResponse?: string;
 }
 
 interface AutoReactResponse {
@@ -505,7 +500,6 @@ export class ConversationFeature implements Feature {
         "Executing tool calls",
       );
 
-      let stopLoop = false;
       for (const toolCall of stepResult.toolCalls) {
         const toolResult = await this.executeToolCall(
           toolCall,
@@ -514,17 +508,8 @@ export class ConversationFeature implements Feature {
         messages.push({
           role: "tool",
           toolCallId: toolCall.id,
-          content: toolResult.toolResponseText,
+          content: toolResult,
         });
-
-        if (toolResult.finalResponse) {
-          finalResponse = toolResult.finalResponse;
-          stopLoop = true;
-        }
-      }
-
-      if (stopLoop) {
-        break;
       }
     }
 
@@ -920,12 +905,14 @@ You have tools available to:
 - react: React to a message with an emoji
 - generate_image: Generate an image with a prompt
 - search_memory: Search your memory for information you don't currently recall
-- get_scrapbook_memory: Get a random memorable quote from the scrapbook
-- search_scrapbook: Search for specific memorable quotes
-- get_scrapbook_context: Get the surrounding conversation for a scrapbook memory
+- get_scrapbook_memory: Get a random memorable quote from the scrapbook (POSTS TO CHANNEL)
+- search_scrapbook: Search for specific memorable quotes (POSTS TO CHANNEL)
+- get_scrapbook_context: Get the surrounding conversation for a scrapbook memory (POSTS TO CHANNEL)
 - delete_scrapbook_memory: Delete a scrapbook memory (use when someone says "bad memory")
 
-Your final text response will be sent as a message to the channel. Use tools for side effects (reactions, images, memory searches) and then provide your text response.
+IMPORTANT: The scrapbook tools (get_scrapbook_memory, search_scrapbook, get_scrapbook_context) automatically post their results directly to the channel. You do NOT need to repeat or summarize what they show.
+
+Your final text response will be sent as a message to the channel. An empty response sends nothing - use this when your tool calls have already provided the response (like after scrapbook calls). Unless asked to do so, do not add additional commentary after calling the scrapbook tools that auto-post for you, just provide an empty response after those.
 
 Message references in context (use these IDs when reacting):
 ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}${scrapbookContext}`;
@@ -963,7 +950,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
   private async executeToolCall(
     toolCall: ToolCall,
     executionContext: ToolExecutionContext,
-  ): Promise<ToolResult> {
+  ): Promise<string> {
     const { message, channelId, messageIdMap } = executionContext;
 
     switch (toolCall.name) {
@@ -975,15 +962,13 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         if (emoji) {
           try {
             await targetMessage.react(emoji);
-            return {
-              toolResponseText: `Successfully reacted with ${emojiInput}`,
-            };
+            return `Successfully reacted with ${emojiInput}`;
           } catch (error) {
             this.ctx.logger.warn({ err: error, emoji }, "Failed to react");
-            return { toolResponseText: `Failed to react with ${emojiInput}` };
+            return `Failed to react with ${emojiInput}`;
           }
         }
-        return { toolResponseText: `Could not resolve emoji: ${emojiInput}` };
+        return `Could not resolve emoji: ${emojiInput}`;
       }
 
       case "generate_image": {
@@ -1067,7 +1052,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
             resultMessage = `Failed to generate image: ${error.message}`;
           },
         );
-        return { toolResponseText: resultMessage };
+        return resultMessage;
       }
 
       case "search_memory": {
@@ -1077,13 +1062,9 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           const memoryResultsText = searchResults
             .map((m) => `- ${m.content}`)
             .join("\n");
-          return {
-            toolResponseText: `Found memories:\n${memoryResultsText}`,
-          };
+          return `Found memories:\n${memoryResultsText}`;
         }
-        return {
-          toolResponseText: "No relevant memories found for that query.",
-        };
+        return "No relevant memories found for that query.";
       }
 
       case "get_scrapbook_memory": {
@@ -1094,15 +1075,21 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           if (context) {
             context.lastScrapbookMemoryId = memory.id;
           }
-          return {
-            toolResponseText: `Displayed scrapbook memory to channel`,
-            finalResponse: this.formatScrapbookMemory(memory),
-          };
+          const formatted = this.formatScrapbookMemory(memory);
+          const sendResult = await this.ctx.messenger.sendToChannel(
+            channelId,
+            formatted,
+          );
+          if (sendResult.isErr()) {
+            this.ctx.logger.error(
+              { err: sendResult.error },
+              "Failed to post scrapbook memory",
+            );
+            return "Failed to post scrapbook memory to channel.";
+          }
+          return `Posted scrapbook memory to channel [${memory.id}]: "${memory.keyMessage}" by ${memory.author}`;
         }
-        return {
-          toolResponseText: "No scrapbook memories found.",
-          finalResponse: "no scrapbook memories yet",
-        };
+        return "No scrapbook memories found.";
       }
 
       case "search_scrapbook": {
@@ -1115,45 +1102,58 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           if (context && firstResult) {
             context.lastScrapbookMemoryId = firstResult.id;
           }
-          return {
-            toolResponseText: `Displayed ${results.length} scrapbook memories to channel`,
-            finalResponse: this.formatScrapbookSearchResults(results),
-          };
+          const formatted = this.formatScrapbookSearchResults(results);
+          const sendResult = await this.ctx.messenger.sendToChannel(
+            channelId,
+            formatted,
+          );
+          if (sendResult.isErr()) {
+            this.ctx.logger.error(
+              { err: sendResult.error },
+              "Failed to post scrapbook search results",
+            );
+            return "Failed to post scrapbook results to channel.";
+          }
+          const summaryText = results
+            .map((m) => `[${m.id}]: "${m.keyMessage}" by ${m.author}`)
+            .join("; ");
+          return `Posted ${results.length} scrapbook memories to channel: ${summaryText}`;
         }
-        return {
-          toolResponseText: "No matching scrapbook memories found.",
-          finalResponse: "nothing in the scrapbook for that",
-        };
+        return "No matching scrapbook memories found.";
       }
 
       case "get_scrapbook_context": {
         const memoryId = toolCall.arguments.memoryId as string;
         const memory = await this.ctx.scrapbook.getMemoryById(memoryId);
         if (memory) {
-          return {
-            toolResponseText: `Displayed scrapbook context to channel`,
-            finalResponse: this.formatScrapbookContext(memory),
-          };
+          const formatted = this.formatScrapbookContext(memory);
+          const sendResult = await this.ctx.messenger.sendToChannel(
+            channelId,
+            formatted,
+          );
+          if (sendResult.isErr()) {
+            this.ctx.logger.error(
+              { err: sendResult.error },
+              "Failed to post scrapbook context",
+            );
+            return "Failed to post context to channel.";
+          }
+          return `Posted context for "${memory.keyMessage}" to channel`;
         }
-        return {
-          toolResponseText: "Could not find that scrapbook memory.",
-          finalResponse: "can't find that memory",
-        };
+        return "Could not find that scrapbook memory.";
       }
 
       case "delete_scrapbook_memory": {
         const memoryId = toolCall.arguments.memoryId as string;
         const success = await this.ctx.scrapbook.deleteMemory(memoryId);
         if (success) {
-          return { toolResponseText: "Deleted the scrapbook memory." };
+          return "Deleted the scrapbook memory.";
         }
-        return {
-          toolResponseText: "Could not delete that scrapbook memory.",
-        };
+        return "Could not delete that scrapbook memory.";
       }
 
       default:
-        return { toolResponseText: `Unknown tool: ${toolCall.name}` };
+        return `Unknown tool: ${toolCall.name}`;
     }
   }
 
@@ -1178,7 +1178,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
     context: Array<{ author: string; content: string }>;
   }): string {
     const contextLines = memory.context
-      .map((message) => `<${message.author}> ${message.content}`)
+      .map((m) => `<${m.author}> ${m.content}`)
       .join("\n");
     return `**context for "${memory.keyMessage}":**\n\`\`\`\n${contextLines}\n\`\`\``;
   }
