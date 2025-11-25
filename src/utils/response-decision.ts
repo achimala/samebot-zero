@@ -1,8 +1,6 @@
 import type { Message } from "discord.js";
 import type { Logger } from "pino";
-import type { ChatMessage } from "../openai/client";
-import type { OpenAIClient } from "../openai/client";
-import type { ConversationFeature } from "../features/conversation";
+import type { ChatMessage, OpenAIClient } from "../openai/client";
 
 export interface TimestampedMessage extends ChatMessage {
   timestamp: number;
@@ -18,7 +16,6 @@ export interface ResponseDecisionOptions {
   openai: OpenAIClient;
   botUserId?: string;
   logger?: Logger;
-  conversation?: ConversationFeature;
 }
 
 export class ResponseDecision {
@@ -73,60 +70,37 @@ Do NOT return true if:
 
 Return false when in doubt.`;
 
-    const decision = this.options.conversation
-      ? await this.options.conversation.chatStructuredWithContext<{
-          shouldRespond: boolean;
-        }>(message.channelId, {
-          systemMessage,
-          userMessage: `Latest message: ${latestMessageContent}\n\nShould samebot respond to the latest message?`,
-          schema: {
-            type: "object",
-            properties: {
-              shouldRespond: {
-                type: "boolean",
-                description:
-                  "Whether samebot should respond to the latest message",
-              },
-            },
-            required: ["shouldRespond"],
-            additionalProperties: false,
+    const decision = await this.options.openai.chatStructured<{
+      shouldRespond: boolean;
+    }>({
+      model: "gpt-5-mini",
+      messages: [
+        {
+          role: "system",
+          content: systemMessage,
+        },
+        {
+          role: "user",
+          content: `Recent conversation context:\n${this.buildConversationContext(context)}\n\nLatest message: ${latestMessageContent}\n\nShould samebot respond to the latest message?`,
+        },
+      ],
+      schema: {
+        type: "object",
+        properties: {
+          shouldRespond: {
+            type: "boolean",
+            description: "Whether samebot should respond to the latest message",
           },
-          schemaName: "responseDecision",
-          schemaDescription: "Decision on whether samebot should respond",
-          model: "gpt-5-mini",
-        })
-      : await this.options.openai.chatStructured<{
-          shouldRespond: boolean;
-        }>({
-          model: "gpt-5-mini",
-          messages: [
-            {
-              role: "system",
-              content: systemMessage,
-            },
-            {
-              role: "user",
-              content: `Recent conversation context:\n${this.buildConversationContext(context)}\n\nLatest message: ${latestMessageContent}\n\nShould samebot respond to the latest message?`,
-            },
-          ],
-          schema: {
-            type: "object",
-            properties: {
-              shouldRespond: {
-                type: "boolean",
-                description:
-                  "Whether samebot should respond to the latest message",
-              },
-            },
-            required: ["shouldRespond"],
-            additionalProperties: false,
-          },
-          schemaName: "responseDecision",
-          schemaDescription: "Decision on whether samebot should respond",
-        });
+        },
+        required: ["shouldRespond"],
+        additionalProperties: false,
+      },
+      schemaName: "responseDecision",
+      schemaDescription: "Decision on whether samebot should respond",
+    });
 
     return decision.match(
-      (result) => {
+      (result: { shouldRespond: boolean }) => {
         if (result.shouldRespond) {
           this.options.logger?.debug(
             "Responding: AI determined response is appropriate",

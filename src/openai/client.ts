@@ -11,6 +11,28 @@ export type ChatMessage = {
   images?: string[];
 };
 
+export type ToolMessage = {
+  role: "tool";
+  toolCallId: string;
+  content: string;
+};
+
+export type ToolDefinition = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+export type ToolCall = {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+};
+
+export type ToolStepResult =
+  | { done: true; text: string }
+  | { done: false; toolCalls: ToolCall[] };
+
 const DEFAULT_IMAGE_CONFIG = {
   aspectRatio: "1:1" as const,
   imageSize: "1K" as const,
@@ -193,6 +215,115 @@ export class OpenAIClient {
       }
       return ok(parsedData);
     });
+  }
+
+  chatWithToolsStep(options: {
+    messages: Array<ChatMessage | ToolMessage>;
+    tools: ToolDefinition[];
+    allowSearch?: boolean;
+  }) {
+    const input: OpenAI.Responses.ResponseInput = options.messages.map(
+      (message) => {
+        if (message.role === "tool") {
+          return {
+            type: "function_call_output" as const,
+            call_id: message.toolCallId,
+            output: message.content,
+          };
+        }
+        return this.formatMessageForInput(message);
+      },
+    );
+
+    const tools: Array<
+      | { type: "web_search" }
+      | {
+          type: "function";
+          name: string;
+          description: string;
+          parameters: Record<string, unknown>;
+          strict: boolean;
+        }
+    > = options.tools.map((tool) => ({
+      type: "function" as const,
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+      strict: true,
+    }));
+
+    if (options.allowSearch) {
+      tools.push({ type: "web_search" as const });
+    }
+
+    const params = {
+      model: "gpt-5.1",
+      input,
+      tools,
+    };
+
+    this.logger.debug(
+      {
+        model: params.model,
+        messageCount: options.messages.length,
+        tools: options.tools.map((t) => t.name),
+        allowSearch: options.allowSearch,
+      },
+      "OpenAI tool step input",
+    );
+
+    return ResultAsync.fromPromise(
+      this.client.responses.create(
+        params,
+      ) as Promise<OpenAI.Responses.Response>,
+      (error) => {
+        this.logger.error({ err: error }, "OpenAI tool step failed");
+        return Errors.openai(
+          error instanceof Error ? error.message : "Unknown OpenAI error",
+        );
+      },
+    ).andThen((response) => {
+      const result = this.parseToolStepResponse(response);
+      this.logger.debug(
+        {
+          model: params.model,
+          result,
+          rawResponse: response,
+        },
+        "OpenAI tool step output",
+      );
+      return ok(result);
+    });
+  }
+
+  private parseToolStepResponse(
+    response: OpenAI.Responses.Response,
+  ): ToolStepResult {
+    const toolCalls: ToolCall[] = [];
+    const textChunks: string[] = [];
+
+    for (const entry of response.output) {
+      if (entry.type === "function_call") {
+        toolCalls.push({
+          id: entry.call_id,
+          name: entry.name,
+          arguments: JSON.parse(entry.arguments) as Record<string, unknown>,
+        });
+      } else if (entry.type === "message") {
+        for (const content of entry.content) {
+          if (content.type === "output_text") {
+            textChunks.push(content.text);
+          }
+        }
+      }
+    }
+
+    if (toolCalls.length > 0) {
+      return { done: false, toolCalls };
+    }
+
+    const text = textChunks.join("\n").trim();
+    return { done: true, text };
   }
 
   generateEmbedding(text: string) {

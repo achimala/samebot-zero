@@ -5,7 +5,12 @@ import type {
 } from "discord.js";
 import { DateTime } from "luxon";
 import { type Feature, type RuntimeContext } from "../core/runtime";
-import type { ChatMessage } from "../openai/client";
+import type {
+  ChatMessage,
+  ToolMessage,
+  ToolDefinition,
+  ToolCall,
+} from "../openai/client";
 import type { BotError } from "../core/errors";
 import {
   ResponseDecision,
@@ -22,6 +27,73 @@ always respond very briefly - aim for 5-10 words maximum. be terse and to the po
 speak like a proper Brit - understated, witty, and occasionally self-deprecating.`;
 
 const MEMORY_EXTRACTION_INTERVAL = 6;
+const MAX_TOOL_ITERATIONS = 10;
+
+const TOOL_DEFINITIONS: ToolDefinition[] = [
+  {
+    name: "react",
+    description:
+      "React to a message with an emoji. Use this to add emoji reactions to messages in the conversation.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageId: {
+          type: "string",
+          description: "The ID of the message to react to",
+        },
+        emoji: {
+          type: "string",
+          description:
+            "The emoji to react with. Can be a Unicode emoji or a custom emoji name.",
+        },
+      },
+      required: ["messageId", "emoji"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "generate_image",
+    description:
+      "Generate an image based on a text prompt. Use this when asked to create, draw, or generate images.",
+    parameters: {
+      type: "object",
+      properties: {
+        prompt: {
+          type: "string",
+          description: "A detailed description of the image to generate",
+        },
+        aspectRatio: {
+          type: "string",
+          enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"],
+          description: "The aspect ratio for the image (defaults to 1:1)",
+        },
+        imageSize: {
+          type: "string",
+          enum: ["1K", "2K", "4K"],
+          description: "The resolution of the image (defaults to 1K)",
+        },
+      },
+      required: ["prompt"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "search_memory",
+    description:
+      "Search your memory for information about someone or something. Use this when asked about things you should know but don't have in current context.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The search query to find relevant memories",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+];
 
 interface ConversationState extends ConversationContext {
   lastResponseAt?: number;
@@ -36,28 +108,10 @@ interface MessageReference {
   author?: string;
 }
 
-interface BotAction {
-  type: "send_message" | "react" | "generate_image" | "search_memory";
-  messageId: string | null;
-  content: string | null;
-  emoji: string | null;
-  prompt: string | null;
-  aspectRatio:
-    | "1:1"
-    | "2:3"
-    | "3:2"
-    | "3:4"
-    | "4:3"
-    | "9:16"
-    | "16:9"
-    | "21:9"
-    | null;
-  imageSize: "1K" | "2K" | "4K" | null;
-  memoryQuery: string | null;
-}
-
-interface BotActions {
-  actions: BotAction[];
+interface ToolExecutionContext {
+  message: Message;
+  channelId: string;
+  messageIdMap: Map<string, Message>;
 }
 
 interface AutoReactResponse {
@@ -119,60 +173,6 @@ export class ConversationFeature implements Feature {
       chatOptions.allowSearch = options.allowSearch;
     }
     return this.ctx.openai.chat(chatOptions);
-  }
-
-  chatStructuredWithContext<T>(
-    channelId: string,
-    options: {
-      systemMessage: string;
-      userMessage: string;
-      schema: { [key: string]: unknown };
-      schemaName: string;
-      schemaDescription?: string;
-      allowSearch?: boolean;
-      model?: string;
-    },
-  ) {
-    const context = this.getContext(channelId);
-    const messages: ChatMessage[] = [
-      {
-        role: "system",
-        content: options.systemMessage,
-      },
-    ];
-    if (context && context.history.length > 0) {
-      const contextText = this.formatContext(context);
-      messages.push({
-        role: "user",
-        content: `Recent conversation context:\n${contextText}`,
-      });
-    }
-    messages.push({
-      role: "user",
-      content: options.userMessage,
-    });
-    const chatOptions: {
-      messages: ChatMessage[];
-      schema: { [key: string]: unknown };
-      schemaName: string;
-      schemaDescription?: string;
-      allowSearch?: boolean;
-      model?: string;
-    } = {
-      messages,
-      schema: options.schema,
-      schemaName: options.schemaName,
-    };
-    if (options.schemaDescription !== undefined) {
-      chatOptions.schemaDescription = options.schemaDescription;
-    }
-    if (options.allowSearch !== undefined) {
-      chatOptions.allowSearch = options.allowSearch;
-    }
-    if (options.model !== undefined) {
-      chatOptions.model = options.model;
-    }
-    return this.ctx.openai.chatStructured<T>(chatOptions);
   }
 
   formatContextWithIds(context: ConversationContext): {
@@ -242,7 +242,6 @@ export class ConversationFeature implements Feature {
     this.responseDecision = new ResponseDecision({
       openai: context.openai,
       logger: context.logger,
-      conversation: this,
     });
     context.discord.once("ready", (client) => {
       this.botUserId = client.user.id;
@@ -250,7 +249,6 @@ export class ConversationFeature implements Feature {
         openai: context.openai,
         botUserId: client.user.id,
         logger: context.logger,
-        conversation: this,
       });
       void this.handleStartup();
     });
@@ -367,312 +365,124 @@ export class ConversationFeature implements Feature {
 
     const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
 
-You can perform multiple actions:
-- send_message: Send a text message to the channel
-- react: React to a message by referencing its message ID
+You have tools available to:
+- react: React to a message with an emoji
 - generate_image: Generate an image with a prompt
-- search_memory: Search your memory for information about someone or something you don't currently recall. Use this when asked about something you should know but don't have in your current memory context.
+- search_memory: Search your memory for information you don't currently recall
 
-Message references in context:
+Your final text response will be sent as a message to the channel. Use tools for side effects (reactions, images, memory searches) and then provide your text response.
+
+Message references in context (use these IDs when reacting):
 ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}`;
 
-    const response = await this.chatStructuredWithContext<BotActions>(
-      message.channelId,
+    const messageIdMap = new Map<string, Message>();
+    for (const ref of contextWithIds.references) {
+      const matchingMessage = await this.findMessageById(
+        message.channelId,
+        ref.id,
+      );
+      if (matchingMessage) {
+        messageIdMap.set(ref.id, matchingMessage);
+      }
+    }
+    messageIdMap.set(message.id, message);
+
+    const executionContext: ToolExecutionContext = {
+      message,
+      channelId: message.channelId,
+      messageIdMap,
+    };
+
+    const messages: Array<ChatMessage | ToolMessage> = [
       {
-        systemMessage,
-        userMessage: `Recent conversation:\n${contextWithIds.text}\n\nWhat actions should you take?`,
+        role: "system",
+        content: systemMessage,
+      },
+      {
+        role: "user",
+        content: `Recent conversation:\n${contextWithIds.text}`,
+      },
+    ];
+
+    let finalResponse: string | null = null;
+
+    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      const result = await this.ctx.openai.chatWithToolsStep({
+        messages,
+        tools: TOOL_DEFINITIONS,
         allowSearch: true,
-        schema: {
-          type: "object",
-          properties: {
-            actions: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  type: {
-                    type: "string",
-                    enum: [
-                      "send_message",
-                      "react",
-                      "generate_image",
-                      "search_memory",
-                    ],
-                    description: "The type of action to perform",
-                  },
-                  content: {
-                    type: ["string", "null"],
-                    description:
-                      "Message content (required for send_message, null otherwise)",
-                  },
-                  messageId: {
-                    type: ["string", "null"],
-                    description:
-                      "Message ID to react to (required for react, null otherwise)",
-                  },
-                  emoji: {
-                    type: ["string", "null"],
-                    description:
-                      "Emoji to react with. Can be Unicode emoji or custom emoji name/format. (required for react, null otherwise)",
-                  },
-                  prompt: {
-                    type: ["string", "null"],
-                    description:
-                      "Image generation prompt (required for generate_image, null otherwise)",
-                  },
-                  aspectRatio: {
-                    type: ["string", "null"],
-                    enum: [
-                      "1:1",
-                      "2:3",
-                      "3:2",
-                      "3:4",
-                      "4:3",
-                      "9:16",
-                      "16:9",
-                      "21:9",
-                    ],
-                    description:
-                      "Aspect ratio for image generation (optional, defaults to 1:1)",
-                  },
-                  imageSize: {
-                    type: ["string", "null"],
-                    enum: ["1K", "2K", "4K"],
-                    description:
-                      "Image size for image generation (optional, defaults to 1K)",
-                  },
-                  memoryQuery: {
-                    type: ["string", "null"],
-                    description:
-                      "Query to search your memory (required for search_memory, null otherwise)",
-                  },
-                },
-                required: [
-                  "type",
-                  "content",
-                  "messageId",
-                  "emoji",
-                  "prompt",
-                  "aspectRatio",
-                  "imageSize",
-                  "memoryQuery",
-                ],
-                additionalProperties: false,
-              },
-            },
-          },
-          required: ["actions"],
-          additionalProperties: false,
-        },
-        schemaName: "botActions",
-        schemaDescription: "List of actions for the bot to perform",
-      },
-    );
+      });
 
-    await response.match(
-      async (actions) => {
-        this.ctx.logger.info({ actions }, "Action output");
-        const messageIdMap = new Map<string, Message>();
-        for (const ref of contextWithIds.references) {
-          const matchingMessage = await this.findMessageById(
-            message.channelId,
-            ref.id,
+      const stepResult = result.match(
+        (value) => value,
+        (error) => {
+          this.ctx.logger.error(
+            { err: error },
+            "Failed to get tool step response",
           );
-          if (matchingMessage) {
-            messageIdMap.set(ref.id, matchingMessage);
-          }
-        }
-        messageIdMap.set(message.id, message);
+          return null;
+        },
+      );
 
-        for (const action of actions.actions) {
-          if (action.type === "send_message" && action.content !== null) {
-            const channel = await this.ctx.discord.channels.fetch(
-              message.channelId,
-            );
-            if (channel && channel.isTextBased() && "send" in channel) {
-              try {
-                const sentMessage = await channel.send(action.content);
-                context.history.push({
-                  role: "assistant",
-                  content: action.content,
-                  timestamp: Date.now(),
-                  messageId: sentMessage.id,
-                });
-              } catch (sendError) {
-                this.ctx.logger.error(
-                  { err: sendError },
-                  "Failed to deliver message",
-                );
-              }
-            }
-          } else if (
-            action.type === "react" &&
-            action.messageId !== null &&
-            action.emoji !== null
-          ) {
-            const targetMessage = messageIdMap.get(action.messageId) || message;
-            const emoji = this.resolveEmoji(action.emoji);
-            if (emoji) {
-              try {
-                await targetMessage.react(emoji);
-              } catch (error) {
-                this.ctx.logger.warn({ err: error, emoji }, "Failed to react");
-              }
-            }
-          } else if (
-            action.type === "generate_image" &&
-            action.prompt !== null
-          ) {
-            let effectivePrompt = action.prompt;
-            let referenceImages:
-              | Array<{ data: string; mimeType: string }>
-              | undefined;
+      if (!stepResult) {
+        await this.ctx.messenger
+          .sendToChannel(message.channelId, "something broke, back in a bit")
+          .match(
+            async () => undefined,
+            async (sendError: BotError) =>
+              this.ctx.logger.error(
+                { err: sendError },
+                "Failed to send error message",
+              ),
+          );
+        return;
+      }
 
-            const resolution = await this.entityResolver.resolve(action.prompt);
-            if (resolution) {
-              const built =
-                this.entityResolver.buildPromptWithReferences(resolution);
-              effectivePrompt = built.textPrompt;
-              referenceImages = built.referenceImages;
-            }
+      if (stepResult.done) {
+        finalResponse = stepResult.text;
+        break;
+      }
 
-            const imageOptions: {
-              prompt: string;
-              referenceImages?: Array<{ data: string; mimeType: string }>;
-              aspectRatio?:
-                | "1:1"
-                | "2:3"
-                | "3:2"
-                | "3:4"
-                | "4:3"
-                | "9:16"
-                | "16:9"
-                | "21:9";
-              imageSize?: "1K" | "2K" | "4K";
-            } = {
-              prompt: effectivePrompt,
-            };
-            if (referenceImages) {
-              imageOptions.referenceImages = referenceImages;
-            }
-            if (action.aspectRatio !== null) {
-              imageOptions.aspectRatio = action.aspectRatio;
-            }
-            if (action.imageSize !== null) {
-              imageOptions.imageSize = action.imageSize;
-            }
-            const imageResult =
-              await this.ctx.openai.generateImage(imageOptions);
-            await imageResult.match(
-              async ({ buffer }) => {
-                await this.ctx.messenger
-                  .sendBuffer(
-                    message.channelId,
-                    buffer,
-                    "samebot-image.png",
-                    action.prompt!,
-                  )
-                  .match(
-                    async () => undefined,
-                    async (sendError: BotError) => {
-                      this.ctx.logger.error(
-                        { err: sendError },
-                        "Failed to send image",
-                      );
-                    },
-                  );
-              },
-              async (error) => {
-                this.ctx.logger.error(
-                  { err: error },
-                  "Image generation failed",
-                );
-              },
-            );
-          } else if (
-            action.type === "search_memory" &&
-            action.memoryQuery !== null
-          ) {
-            const searchResults = await this.ctx.memory.searchMemories(
-              action.memoryQuery,
-              10,
-            );
-            if (searchResults.length > 0) {
-              const memoryResultsText = searchResults
-                .map((m) => `- ${m.content}`)
-                .join("\n");
-              const followUpResponse = await this.ctx.openai.chat({
-                messages: [
-                  {
-                    role: "system",
-                    content: `${PERSONA}\nRespond in lowercase only. You searched your memory and found:\n${memoryResultsText}\n\nUse this information to respond to the conversation.`,
-                  },
-                  {
-                    role: "user",
-                    content: `Recent conversation:\n${contextWithIds.text}\n\nBased on what you found in your memory, respond appropriately.`,
-                  },
-                ],
-              });
-              await followUpResponse.match(
-                async (responseText) => {
-                  const channel = await this.ctx.discord.channels.fetch(
-                    message.channelId,
-                  );
-                  if (channel && channel.isTextBased() && "send" in channel) {
-                    try {
-                      const sentMessage = await channel.send(responseText);
-                      context.history.push({
-                        role: "assistant",
-                        content: responseText,
-                        timestamp: Date.now(),
-                        messageId: sentMessage.id,
-                      });
-                    } catch (sendError) {
-                      this.ctx.logger.error(
-                        { err: sendError },
-                        "Failed to deliver memory search response",
-                      );
-                    }
-                  }
-                },
-                async (error) => {
-                  this.ctx.logger.error(
-                    { err: error },
-                    "Failed to generate memory search response",
-                  );
-                },
-              );
-            } else {
-              this.ctx.logger.info(
-                { query: action.memoryQuery },
-                "Memory search returned no results",
-              );
-            }
-          }
-        }
+      this.ctx.logger.info(
+        { toolCalls: stepResult.toolCalls, iteration },
+        "Executing tool calls",
+      );
 
-        context.history = context.history.slice(-12);
-        context.lastResponseAt = Date.now();
-      },
-      async (error) => {
-        this.ctx.logger.error(
-          { err: error },
-          "Failed to generate chat response",
+      for (const toolCall of stepResult.toolCalls) {
+        const toolResult = await this.executeToolCall(
+          toolCall,
+          executionContext,
         );
-        if (error.type === "openai") {
-          await this.ctx.messenger
-            .sendToChannel(message.channelId, "something broke, back in a bit")
-            .match(
-              async () => undefined,
-              async (sendError: BotError) =>
-                this.ctx.logger.error(
-                  { err: sendError },
-                  "Failed to send error message",
-                ),
-            );
+        messages.push({
+          role: "tool",
+          toolCallId: toolCall.id,
+          content: toolResult,
+        });
+      }
+    }
+
+    if (finalResponse && finalResponse.length > 0) {
+      const channel = await this.ctx.discord.channels.fetch(message.channelId);
+      if (channel && channel.isTextBased() && "send" in channel) {
+        try {
+          const sentMessage = await channel.send(finalResponse);
+          context.history.push({
+            role: "assistant",
+            content: finalResponse,
+            timestamp: Date.now(),
+            messageId: sentMessage.id,
+          });
+        } catch (sendError) {
+          this.ctx.logger.error(
+            { err: sendError },
+            "Failed to deliver message",
+          );
         }
-      },
-    );
+      }
+    }
+
+    context.history = context.history.slice(-12);
+    context.lastResponseAt = Date.now();
   }
 
   private async backfillMessages(
@@ -1011,6 +821,131 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       content: `\`\`\`\n${payload}\n\`\`\``,
       ephemeral: true,
     });
+  }
+
+  private async executeToolCall(
+    toolCall: ToolCall,
+    executionContext: ToolExecutionContext,
+  ): Promise<string> {
+    const { message, channelId, messageIdMap } = executionContext;
+
+    switch (toolCall.name) {
+      case "react": {
+        const messageId = toolCall.arguments.messageId as string;
+        const emojiInput = toolCall.arguments.emoji as string;
+        const targetMessage = messageIdMap.get(messageId) || message;
+        const emoji = this.resolveEmoji(emojiInput);
+        if (emoji) {
+          try {
+            await targetMessage.react(emoji);
+            return `Successfully reacted with ${emojiInput}`;
+          } catch (error) {
+            this.ctx.logger.warn({ err: error, emoji }, "Failed to react");
+            return `Failed to react with ${emojiInput}`;
+          }
+        }
+        return `Could not resolve emoji: ${emojiInput}`;
+      }
+
+      case "generate_image": {
+        const prompt = toolCall.arguments.prompt as string;
+        const aspectRatio = toolCall.arguments.aspectRatio as
+          | "1:1"
+          | "2:3"
+          | "3:2"
+          | "3:4"
+          | "4:3"
+          | "9:16"
+          | "16:9"
+          | "21:9"
+          | undefined;
+        const imageSize = toolCall.arguments.imageSize as
+          | "1K"
+          | "2K"
+          | "4K"
+          | undefined;
+
+        let effectivePrompt = prompt;
+        let referenceImages:
+          | Array<{ data: string; mimeType: string }>
+          | undefined;
+
+        const resolution = await this.entityResolver.resolve(prompt);
+        if (resolution) {
+          const built =
+            this.entityResolver.buildPromptWithReferences(resolution);
+          effectivePrompt = built.textPrompt;
+          referenceImages = built.referenceImages;
+        }
+
+        const imageOptions: {
+          prompt: string;
+          referenceImages?: Array<{ data: string; mimeType: string }>;
+          aspectRatio?:
+            | "1:1"
+            | "2:3"
+            | "3:2"
+            | "3:4"
+            | "4:3"
+            | "9:16"
+            | "16:9"
+            | "21:9";
+          imageSize?: "1K" | "2K" | "4K";
+        } = {
+          prompt: effectivePrompt,
+        };
+        if (referenceImages) {
+          imageOptions.referenceImages = referenceImages;
+        }
+        if (aspectRatio) {
+          imageOptions.aspectRatio = aspectRatio;
+        }
+        if (imageSize) {
+          imageOptions.imageSize = imageSize;
+        }
+
+        const imageResult = await this.ctx.openai.generateImage(imageOptions);
+        let resultMessage = "";
+        await imageResult.match(
+          async ({ buffer }) => {
+            await this.ctx.messenger
+              .sendBuffer(channelId, buffer, "samebot-image.png", prompt)
+              .match(
+                async () => {
+                  resultMessage = `Successfully generated and sent image for: ${prompt}`;
+                },
+                async (sendError: BotError) => {
+                  this.ctx.logger.error(
+                    { err: sendError },
+                    "Failed to send image",
+                  );
+                  resultMessage = `Generated image but failed to send it`;
+                },
+              );
+          },
+          async (error) => {
+            this.ctx.logger.error({ err: error }, "Image generation failed");
+            resultMessage = `Failed to generate image: ${error.message}`;
+          },
+        );
+        return resultMessage;
+      }
+
+      case "search_memory": {
+        const query = toolCall.arguments.query as string;
+        const searchResults = await this.ctx.memory.searchMemories(query, 10);
+        if (searchResults.length > 0) {
+          const memoryResultsText = searchResults
+            .map((m) => `- ${m.content}`)
+            .join("\n");
+          return `Found memories:\n${memoryResultsText}`;
+        }
+        return "No relevant memories found for that query.";
+      }
+
+      default:
+        return `Unknown tool: ${toolCall.name}`;
+    }
   }
 
   private async handleAutoReact(message: Message, context: ConversationState) {
