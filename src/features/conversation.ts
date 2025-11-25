@@ -93,12 +93,71 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "get_scrapbook_memory",
+    description:
+      "Get a random memorable quote from the scrapbook. Use this when someone asks for a memory, story, or something from the scrapbook.",
+    parameters: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "search_scrapbook",
+    description:
+      "Search the scrapbook for memorable quotes matching a query. Use this when someone asks 'remember when...' or wants to find a specific old quote.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The search query to find matching scrapbook memories",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_scrapbook_context",
+    description:
+      "Get the surrounding conversation context for a scrapbook memory. Use this when someone asks for context, says 'what?', 'huh?', or reacts with confusion to a scrapbook quote.",
+    parameters: {
+      type: "object",
+      properties: {
+        memoryId: {
+          type: "string",
+          description: "The ID of the scrapbook memory to get context for",
+        },
+      },
+      required: ["memoryId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "delete_scrapbook_memory",
+    description:
+      "Delete a scrapbook memory. Use this when someone says 'bad memory' or asks to remove/forget a scrapbook quote.",
+    parameters: {
+      type: "object",
+      properties: {
+        memoryId: {
+          type: "string",
+          description: "The ID of the scrapbook memory to delete",
+        },
+      },
+      required: ["memoryId"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 interface ConversationState extends ConversationContext {
   lastResponseAt?: number;
   messagesSinceLastExtraction: number;
   lastExtractedTimestamp: number;
+  lastScrapbookMemoryId?: string;
 }
 
 interface MessageReference {
@@ -363,17 +422,25 @@ export class ConversationFeature implements Feature {
         ? `\n\nThings you remember about the people in this conversation:\n${relevantMemories.map((m) => `- ${m.content}`).join("\n")}`
         : "";
 
+    const scrapbookContext = context.lastScrapbookMemoryId
+      ? `\n\nLast mentioned scrapbook memory ID: ${context.lastScrapbookMemoryId} (use this for get_scrapbook_context or delete_scrapbook_memory if someone asks for context or says "bad memory")`
+      : "";
+
     const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
 
 You have tools available to:
 - react: React to a message with an emoji
 - generate_image: Generate an image with a prompt
 - search_memory: Search your memory for information you don't currently recall
+- get_scrapbook_memory: Get a random memorable quote from the scrapbook
+- search_scrapbook: Search for specific memorable quotes
+- get_scrapbook_context: Get the surrounding conversation for a scrapbook memory
+- delete_scrapbook_memory: Delete a scrapbook memory (use when someone says "bad memory")
 
 Your final text response will be sent as a message to the channel. Use tools for side effects (reactions, images, memory searches) and then provide your text response.
 
 Message references in context (use these IDs when reacting):
-${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}`;
+${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}${scrapbookContext}`;
 
     const messageIdMap = new Map<string, Message>();
     for (const ref of contextWithIds.references) {
@@ -408,12 +475,20 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
     let previousResponseId: string | undefined;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const result = await this.ctx.openai.chatWithToolsStep({
+      const toolStepOptions: {
+        messages: Array<ChatMessage | ToolMessage>;
+        tools: ToolDefinition[];
+        allowSearch: boolean;
+        previousResponseId?: string;
+      } = {
         messages,
         tools: TOOL_DEFINITIONS,
         allowSearch: true,
-        previousResponseId,
-      });
+      };
+      if (previousResponseId) {
+        toolStepOptions.previousResponseId = previousResponseId;
+      }
+      const result = await this.ctx.openai.chatWithToolsStep(toolStepOptions);
 
       const stepResult = result.match(
         (value) => value,
@@ -945,6 +1020,56 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           return `Found memories:\n${memoryResultsText}`;
         }
         return "No relevant memories found for that query.";
+      }
+
+      case "get_scrapbook_memory": {
+        const memory = await this.ctx.scrapbook.getRandomMemory();
+        if (memory) {
+          const key = channelId;
+          const context = this.contexts.get(key);
+          if (context) {
+            context.lastScrapbookMemoryId = memory.id;
+          }
+          return `Found scrapbook memory [${memory.id}]: "${memory.keyMessage}" - ${memory.author}`;
+        }
+        return "No scrapbook memories found.";
+      }
+
+      case "search_scrapbook": {
+        const query = toolCall.arguments.query as string;
+        const results = await this.ctx.scrapbook.searchMemories(query, 5);
+        if (results.length > 0) {
+          const key = channelId;
+          const context = this.contexts.get(key);
+          const firstResult = results[0];
+          if (context && firstResult) {
+            context.lastScrapbookMemoryId = firstResult.id;
+          }
+          const resultsText = results
+            .map((m) => `[${m.id}]: "${m.keyMessage}" - ${m.author}`)
+            .join("\n");
+          return `Found scrapbook memories:\n${resultsText}`;
+        }
+        return "No matching scrapbook memories found.";
+      }
+
+      case "get_scrapbook_context": {
+        const memoryId = toolCall.arguments.memoryId as string;
+        const memory = await this.ctx.scrapbook.getMemoryById(memoryId);
+        if (memory) {
+          const contextText = this.ctx.scrapbook.formatContext(memory);
+          return `Context for "${memory.keyMessage}":\n${contextText}`;
+        }
+        return "Could not find that scrapbook memory.";
+      }
+
+      case "delete_scrapbook_memory": {
+        const memoryId = toolCall.arguments.memoryId as string;
+        const success = await this.ctx.scrapbook.deleteMemory(memoryId);
+        if (success) {
+          return "Deleted the scrapbook memory.";
+        }
+        return "Could not delete that scrapbook memory.";
       }
 
       default:

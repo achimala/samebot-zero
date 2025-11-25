@@ -6,6 +6,7 @@ import type { DiscordMessenger } from "../discord/messenger";
 import type { SupabaseClient } from "../supabase/client";
 import type { ConversationFeature } from "../features/conversation";
 import type { MemoryService } from "../memory/service";
+import type { ScrapbookService } from "../scrapbook/service";
 
 export interface RuntimeContext {
   config: AppConfig;
@@ -15,6 +16,7 @@ export interface RuntimeContext {
   messenger: DiscordMessenger;
   supabase: SupabaseClient;
   memory: MemoryService;
+  scrapbook: ScrapbookService;
   conversation?: ConversationFeature;
   customEmoji: Map<string, GuildEmoji>;
 }

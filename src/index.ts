@@ -16,8 +16,11 @@ import { UsaCowboyFeature } from "./features/usa-cowboy";
 import { SamebotEmojiFeature } from "./features/samebot-emoji";
 import { RobotEmojiReactFeature } from "./features/robot-emoji-react";
 import { RememberImageFeature } from "./features/remember-image";
+import { ScrapbookFeature } from "./features/scrapbook";
 import { SupabaseMemoryStore } from "./memory/supabase-store";
 import { MemoryService } from "./memory/service";
+import { SupabaseScrapbookStore } from "./scrapbook/supabase-store";
+import { ScrapbookService } from "./scrapbook/service";
 
 async function main() {
   const config = loadConfig();
@@ -30,6 +33,12 @@ async function main() {
   const memoryStore = new SupabaseMemoryStore(supabase.getClient(), logger);
   const memoryService = new MemoryService(memoryStore, openai, logger);
 
+  const scrapbookStore = new SupabaseScrapbookStore(
+    supabase.getClient(),
+    logger,
+  );
+  const scrapbookService = new ScrapbookService(scrapbookStore, openai, logger);
+
   const conversationFeature = new ConversationFeature();
 
   const runtime = {
@@ -40,6 +49,7 @@ async function main() {
     openai,
     supabase,
     memory: memoryService,
+    scrapbook: scrapbookService,
     conversation: conversationFeature,
     customEmoji: gateway.getCustomEmoji(),
   };
@@ -55,6 +65,7 @@ async function main() {
     new SamebotEmojiFeature(),
     new RobotEmojiReactFeature(),
     new RememberImageFeature(),
+    new ScrapbookFeature(),
   ];
 
   features.forEach((feature) => feature.register(runtime));

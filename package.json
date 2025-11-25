@@ -32,10 +32,12 @@
   },
   "devDependencies": {
     "@total-typescript/ts-reset": "^0.6.1",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/luxon": "^3.7.1",
     "@types/node": "^24.10.1",
     "@typescript-eslint/eslint-plugin": "^8.47.0",
     "@typescript-eslint/parser": "^8.47.0",
+    "better-sqlite3": "^11.10.0",
     "eslint": "^9.39.1",
     "tsup": "^8.5.1",
     "tsx": "^4.20.6",
