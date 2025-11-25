@@ -173,6 +173,11 @@ interface ToolExecutionContext {
   messageIdMap: Map<string, Message>;
 }
 
+interface ToolResult {
+  toolResponseText: string;
+  finalResponse?: string;
+}
+
 interface AutoReactResponse {
   emojis: string[];
 }
@@ -500,6 +505,7 @@ export class ConversationFeature implements Feature {
         "Executing tool calls",
       );
 
+      let stopLoop = false;
       for (const toolCall of stepResult.toolCalls) {
         const toolResult = await this.executeToolCall(
           toolCall,
@@ -508,8 +514,17 @@ export class ConversationFeature implements Feature {
         messages.push({
           role: "tool",
           toolCallId: toolCall.id,
-          content: toolResult,
+          content: toolResult.toolResponseText,
         });
+
+        if (toolResult.finalResponse) {
+          finalResponse = toolResult.finalResponse;
+          stopLoop = true;
+        }
+      }
+
+      if (stopLoop) {
+        break;
       }
     }
 
@@ -948,7 +963,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
   private async executeToolCall(
     toolCall: ToolCall,
     executionContext: ToolExecutionContext,
-  ): Promise<string> {
+  ): Promise<ToolResult> {
     const { message, channelId, messageIdMap } = executionContext;
 
     switch (toolCall.name) {
@@ -960,13 +975,15 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         if (emoji) {
           try {
             await targetMessage.react(emoji);
-            return `Successfully reacted with ${emojiInput}`;
+            return {
+              toolResponseText: `Successfully reacted with ${emojiInput}`,
+            };
           } catch (error) {
             this.ctx.logger.warn({ err: error, emoji }, "Failed to react");
-            return `Failed to react with ${emojiInput}`;
+            return { toolResponseText: `Failed to react with ${emojiInput}` };
           }
         }
-        return `Could not resolve emoji: ${emojiInput}`;
+        return { toolResponseText: `Could not resolve emoji: ${emojiInput}` };
       }
 
       case "generate_image": {
@@ -1050,7 +1067,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
             resultMessage = `Failed to generate image: ${error.message}`;
           },
         );
-        return resultMessage;
+        return { toolResponseText: resultMessage };
       }
 
       case "search_memory": {
@@ -1060,9 +1077,13 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           const memoryResultsText = searchResults
             .map((m) => `- ${m.content}`)
             .join("\n");
-          return `Found memories:\n${memoryResultsText}`;
+          return {
+            toolResponseText: `Found memories:\n${memoryResultsText}`,
+          };
         }
-        return "No relevant memories found for that query.";
+        return {
+          toolResponseText: "No relevant memories found for that query.",
+        };
       }
 
       case "get_scrapbook_memory": {
@@ -1073,9 +1094,15 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           if (context) {
             context.lastScrapbookMemoryId = memory.id;
           }
-          return `Found scrapbook memory [${memory.id}]: "${memory.keyMessage}" - ${memory.author}`;
+          return {
+            toolResponseText: `Displayed scrapbook memory to channel`,
+            finalResponse: this.formatScrapbookMemory(memory),
+          };
         }
-        return "No scrapbook memories found.";
+        return {
+          toolResponseText: "No scrapbook memories found.",
+          finalResponse: "no scrapbook memories yet",
+        };
       }
 
       case "search_scrapbook": {
@@ -1088,36 +1115,72 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           if (context && firstResult) {
             context.lastScrapbookMemoryId = firstResult.id;
           }
-          const resultsText = results
-            .map((m) => `[${m.id}]: "${m.keyMessage}" - ${m.author}`)
-            .join("\n");
-          return `Found scrapbook memories:\n${resultsText}`;
+          return {
+            toolResponseText: `Displayed ${results.length} scrapbook memories to channel`,
+            finalResponse: this.formatScrapbookSearchResults(results),
+          };
         }
-        return "No matching scrapbook memories found.";
+        return {
+          toolResponseText: "No matching scrapbook memories found.",
+          finalResponse: "nothing in the scrapbook for that",
+        };
       }
 
       case "get_scrapbook_context": {
         const memoryId = toolCall.arguments.memoryId as string;
         const memory = await this.ctx.scrapbook.getMemoryById(memoryId);
         if (memory) {
-          const contextText = this.ctx.scrapbook.formatContext(memory);
-          return `Context for "${memory.keyMessage}":\n${contextText}`;
+          return {
+            toolResponseText: `Displayed scrapbook context to channel`,
+            finalResponse: this.formatScrapbookContext(memory),
+          };
         }
-        return "Could not find that scrapbook memory.";
+        return {
+          toolResponseText: "Could not find that scrapbook memory.",
+          finalResponse: "can't find that memory",
+        };
       }
 
       case "delete_scrapbook_memory": {
         const memoryId = toolCall.arguments.memoryId as string;
         const success = await this.ctx.scrapbook.deleteMemory(memoryId);
         if (success) {
-          return "Deleted the scrapbook memory.";
+          return { toolResponseText: "Deleted the scrapbook memory." };
         }
-        return "Could not delete that scrapbook memory.";
+        return {
+          toolResponseText: "Could not delete that scrapbook memory.",
+        };
       }
 
       default:
-        return `Unknown tool: ${toolCall.name}`;
+        return { toolResponseText: `Unknown tool: ${toolCall.name}` };
     }
+  }
+
+  private formatScrapbookMemory(memory: {
+    id: string;
+    keyMessage: string;
+    author: string;
+  }): string {
+    return `> "${memory.keyMessage}"\n> — ${memory.author}`;
+  }
+
+  private formatScrapbookSearchResults(
+    results: Array<{ id: string; keyMessage: string; author: string }>,
+  ): string {
+    return results
+      .map((memory) => `> "${memory.keyMessage}"\n> — ${memory.author}`)
+      .join("\n\n");
+  }
+
+  private formatScrapbookContext(memory: {
+    keyMessage: string;
+    context: Array<{ author: string; content: string }>;
+  }): string {
+    const contextLines = memory.context
+      .map((message) => `<${message.author}> ${message.content}`)
+      .join("\n");
+    return `**context for "${memory.keyMessage}":**\n\`\`\`\n${contextLines}\n\`\`\``;
   }
 
   private async handleAutoReact(message: Message, context: ConversationState) {
