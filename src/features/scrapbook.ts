@@ -153,11 +153,14 @@ export class ScrapbookFeature implements Feature {
 
       await imageResult.match(
         async ({ buffer }) => {
+          await this.ctx.messenger.sendToChannel(
+            channelId,
+            formattedMemory,
+          );
           await this.ctx.messenger.sendBuffer(
             channelId,
             buffer,
             "scrapbook-memory.png",
-            formattedMemory,
           );
         },
         async (error) => {
