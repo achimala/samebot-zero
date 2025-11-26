@@ -1,4 +1,4 @@
-import type { ChatInputCommandInteraction } from "discord.js";
+import type { ChatInputCommandInteraction, ButtonInteraction } from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import { EmojiGenerator, type ReferenceImage } from "../utils/emoji-generator";
 
@@ -10,13 +10,20 @@ export class SamebotEmojiFeature implements Feature {
     this.ctx = context;
     this.emojiGenerator = new EmojiGenerator(context);
     context.discord.on("interactionCreate", (interaction) => {
-      if (!interaction.isChatInputCommand()) {
+      if (interaction.isChatInputCommand()) {
+        if (interaction.commandName === "emoji") {
+          void this.handleSamebotEmoji(interaction);
+        }
         return;
       }
-      if (interaction.commandName !== "emoji") {
+      if (interaction.isButton()) {
+        if (interaction.customId.startsWith("emoji-save-")) {
+          void this.handleSaveButton(interaction);
+        } else if (interaction.customId.startsWith("emoji-reroll-")) {
+          void this.handleRerollButton(interaction);
+        }
         return;
       }
-      void this.handleSamebotEmoji(interaction);
     });
   }
 
@@ -47,18 +54,105 @@ export class SamebotEmojiFeature implements Feature {
       }
     }
 
-    const result = await this.emojiGenerator.generate(prompt, referenceImages);
+    const preview = await this.emojiGenerator.generatePreview(
+      prompt,
+      referenceImages,
+    );
 
-    if (!result) {
+    if (!preview) {
       await interaction.editReply({
-        content: "Failed to generate emoji",
+        content: "Failed to generate emoji preview",
+      });
+      return;
+    }
+
+    const previewId = await this.emojiGenerator.postPreviewWithButtons(preview);
+
+    if (!previewId) {
+      await interaction.editReply({
+        content: "Failed to post emoji preview",
       });
       return;
     }
 
     await interaction.editReply({
-      content: `Generated new :${result.name}: emoji! ${result.emoji}`,
+      content: `Emoji preview posted! Check #general in the emoji server to save or reroll.`,
     });
+  }
+
+  private async handleSaveButton(interaction: ButtonInteraction) {
+    const previewId = interaction.customId.replace("emoji-save-", "");
+    const preview = this.emojiGenerator.getPendingPreview(previewId);
+
+    if (!preview) {
+      await interaction.reply({
+        content: "This emoji preview has expired or already been processed.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.deferUpdate();
+
+    const result = await this.emojiGenerator.saveEmoji(preview);
+    this.emojiGenerator.deletePendingPreview(previewId);
+
+    if (!result) {
+      await interaction.message.edit({
+        content: `**:${preview.name}:** ${preview.prompt}\n❌ Failed to save emoji`,
+        components: [],
+      });
+      return;
+    }
+
+    await interaction.message.edit({
+      content: `**:${result.name}:** ${preview.prompt}\n✅ Saved! ${result.emoji}`,
+      components: [],
+    });
+  }
+
+  private async handleRerollButton(interaction: ButtonInteraction) {
+    const previewId = interaction.customId.replace("emoji-reroll-", "");
+    const preview = this.emojiGenerator.getPendingPreview(previewId);
+
+    if (!preview) {
+      await interaction.reply({
+        content: "This emoji preview has expired or already been processed.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.deferUpdate();
+
+    await interaction.message.edit({
+      content: `**:${preview.name}:** ${preview.prompt}\n🔄 Rerolling...`,
+      components: [],
+    });
+
+    this.emojiGenerator.deletePendingPreview(previewId);
+
+    const newPreview = await this.emojiGenerator.generatePreview(
+      preview.prompt,
+      preview.referenceImages,
+    );
+
+    if (!newPreview) {
+      await interaction.message.edit({
+        content: `**:${preview.name}:** ${preview.prompt}\n❌ Failed to generate new preview`,
+        components: [],
+      });
+      return;
+    }
+
+    const newPreviewId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    this.emojiGenerator.setPendingPreview(newPreviewId, newPreview);
+
+    await this.emojiGenerator.updatePreviewMessage(
+      interaction.message,
+      newPreview,
+      newPreviewId,
+    );
   }
 
   private async fetchImageAsBase64(url: string): Promise<string | null> {
