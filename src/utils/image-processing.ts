@@ -1,7 +1,7 @@
 import sharp from "sharp";
 
 const MAGENTA_TARGET = { r: 255, g: 0, b: 255 };
-const COLOR_TOLERANCE = 60;
+const COLOR_TOLERANCE = 70;
 
 export async function processEmojiImage(inputBuffer: Buffer): Promise<Buffer> {
   const image = sharp(inputBuffer);
