@@ -142,6 +142,8 @@ export class ScrapbookFeature implements Feature {
 
     state.hasSentConversationStarter = true;
 
+    const formattedMemory = this.formatScrapbookMemory(memory);
+
     const imagePrompt = await this.generateImagePromptForMemory(memory);
     if (imagePrompt) {
       const imageResult = await this.ctx.openai.generateImage({
@@ -155,7 +157,7 @@ export class ScrapbookFeature implements Feature {
             channelId,
             buffer,
             "scrapbook-memory.png",
-            `hey, remember this? ${memory.keyMessage}`,
+            formattedMemory,
           );
         },
         async (error) => {
@@ -165,16 +167,20 @@ export class ScrapbookFeature implements Feature {
           );
           await this.ctx.messenger.sendToChannel(
             channelId,
-            `hey, remember this? ${memory.keyMessage}`,
+            formattedMemory,
           );
         },
       );
     } else {
       await this.ctx.messenger.sendToChannel(
         channelId,
-        `hey, remember this? ${memory.keyMessage}`,
+        formattedMemory,
       );
     }
+  }
+
+  private formatScrapbookMemory(memory: ScrapbookMemory): string {
+    return `> "${memory.keyMessage}"\n> — ${memory.author}`;
   }
 
   private async generateImagePromptForMemory(
