@@ -1,13 +1,4 @@
-import {
-  ChannelType,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  type Guild,
-  type GuildEmoji,
-  type TextChannel,
-  type Message,
-} from "discord.js";
+import { ChannelType, type Guild, type GuildEmoji } from "discord.js";
 import type { RuntimeContext } from "../core/runtime";
 import { processEmojiImage } from "./image-processing";
 import { EntityResolver } from "./entity-resolver";
@@ -23,13 +14,6 @@ export interface GeneratedEmoji {
   name: string;
 }
 
-export interface EmojiPreview {
-  name: string;
-  buffer: Buffer;
-  prompt: string;
-  referenceImages: ReferenceImage[] | undefined;
-}
-
 export interface ReferenceImage {
   data: string;
   mimeType: string;
@@ -37,16 +21,15 @@ export interface ReferenceImage {
 
 export class EmojiGenerator {
   private readonly entityResolver: EntityResolver;
-  private pendingPreviews = new Map<string, EmojiPreview>();
 
   constructor(private readonly ctx: RuntimeContext) {
     this.entityResolver = new EntityResolver(ctx.supabase, ctx.logger);
   }
 
-  async generatePreview(
+  async generate(
     prompt: string,
     referenceImages?: ReferenceImage[],
-  ): Promise<EmojiPreview | null> {
+  ): Promise<GeneratedEmoji | null> {
     let effectivePrompt = prompt;
     let effectiveReferenceImages = referenceImages;
 
@@ -57,6 +40,16 @@ export class EmojiGenerator {
         effectivePrompt = built.textPrompt;
         effectiveReferenceImages = built.referenceImages;
       }
+    }
+    const emojiGuild = this.ctx.discord.guilds.cache.get(
+      this.ctx.config.emojiGuildId,
+    );
+    if (!emojiGuild) {
+      this.ctx.logger.error(
+        { emojiGuildId: this.ctx.config.emojiGuildId },
+        "Emoji guild not found",
+      );
+      return null;
     }
 
     const nameResult = await this.generateEmojiName(prompt);
@@ -91,109 +84,11 @@ export class EmojiGenerator {
 
     try {
       const processedBuffer = await processEmojiImage(buffer);
-      return {
-        name: emojiName,
-        buffer: processedBuffer,
-        prompt,
-        referenceImages: effectiveReferenceImages,
-      };
-    } catch (error) {
-      this.ctx.logger.error({ err: error }, "Failed to process emoji image");
-      return null;
-    }
-  }
-
-  async postPreviewWithButtons(preview: EmojiPreview): Promise<string | null> {
-    const emojiGuild = this.ctx.discord.guilds.cache.get(
-      this.ctx.config.emojiGuildId,
-    );
-    if (!emojiGuild) {
-      this.ctx.logger.error(
-        { emojiGuildId: this.ctx.config.emojiGuildId },
-        "Emoji guild not found",
-      );
-      return null;
-    }
-
-    const generalChannel = this.getGeneralChannel(emojiGuild);
-    if (!generalChannel) {
-      this.ctx.logger.warn(
-        { guildId: emojiGuild.id },
-        "No #general channel found for emoji preview",
-      );
-      return null;
-    }
-
-    const previewId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-    this.pendingPreviews.set(previewId, preview);
-
-    const saveButton = new ButtonBuilder()
-      .setCustomId(`emoji-save-${previewId}`)
-      .setLabel("Save")
-      .setStyle(ButtonStyle.Success);
-
-    const rerollButton = new ButtonBuilder()
-      .setCustomId(`emoji-reroll-${previewId}`)
-      .setLabel("Reroll")
-      .setStyle(ButtonStyle.Secondary);
-
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      saveButton,
-      rerollButton,
-    );
-
-    try {
-      const channel = generalChannel as TextChannel;
-      await channel.send({
-        content: `**:${preview.name}:** ${preview.prompt}`,
-        files: [
-          {
-            attachment: preview.buffer,
-            name: `${preview.name}.png`,
-          },
-        ],
-        components: [row],
-      });
-
-      return previewId;
-    } catch (error) {
-      this.ctx.logger.error({ err: error }, "Failed to post emoji preview");
-      this.pendingPreviews.delete(previewId);
-      return null;
-    }
-  }
-
-  getPendingPreview(previewId: string): EmojiPreview | undefined {
-    return this.pendingPreviews.get(previewId);
-  }
-
-  setPendingPreview(previewId: string, preview: EmojiPreview): void {
-    this.pendingPreviews.set(previewId, preview);
-  }
-
-  deletePendingPreview(previewId: string): void {
-    this.pendingPreviews.delete(previewId);
-  }
-
-  async saveEmoji(preview: EmojiPreview): Promise<GeneratedEmoji | null> {
-    const emojiGuild = this.ctx.discord.guilds.cache.get(
-      this.ctx.config.emojiGuildId,
-    );
-    if (!emojiGuild) {
-      this.ctx.logger.error(
-        { emojiGuildId: this.ctx.config.emojiGuildId },
-        "Emoji guild not found",
-      );
-      return null;
-    }
-
-    try {
       await this.ensureCapacity(emojiGuild);
 
       const createdEmoji = await emojiGuild.emojis.create({
-        attachment: preview.buffer,
-        name: preview.name,
+        attachment: processedBuffer,
+        name: emojiName,
       });
 
       this.ctx.logger.info(
@@ -201,43 +96,19 @@ export class EmojiGenerator {
         "Created new emoji",
       );
 
-      return { emoji: createdEmoji, name: preview.name };
+      await this.announceNewEmoji(
+        emojiGuild,
+        createdEmoji.toString(),
+        emojiName,
+        processedBuffer,
+        prompt,
+      );
+
+      return { emoji: createdEmoji, name: emojiName };
     } catch (error) {
       this.ctx.logger.error({ err: error }, "Failed to create emoji");
       return null;
     }
-  }
-
-  async updatePreviewMessage(
-    message: Message,
-    preview: EmojiPreview,
-    newPreviewId: string,
-  ): Promise<void> {
-    const saveButton = new ButtonBuilder()
-      .setCustomId(`emoji-save-${newPreviewId}`)
-      .setLabel("Save")
-      .setStyle(ButtonStyle.Success);
-
-    const rerollButton = new ButtonBuilder()
-      .setCustomId(`emoji-reroll-${newPreviewId}`)
-      .setLabel("Reroll")
-      .setStyle(ButtonStyle.Secondary);
-
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      saveButton,
-      rerollButton,
-    );
-
-    await message.edit({
-      content: `**:${preview.name}:** ${preview.prompt}`,
-      files: [
-        {
-          attachment: preview.buffer,
-          name: `${preview.name}.png`,
-        },
-      ],
-      components: [row],
-    });
   }
 
   private async ensureCapacity(emojiGuild: Guild) {
@@ -261,6 +132,38 @@ export class EmojiGenerator {
       (channel) =>
         channel.type === ChannelType.GuildText && channel.name === "general",
     );
+  }
+
+  private async announceNewEmoji(
+    emojiGuild: Guild,
+    emojiString: string,
+    emojiName: string,
+    imageBuffer: Buffer,
+    prompt: string,
+  ) {
+    const generalChannel = this.getGeneralChannel(emojiGuild);
+
+    if (!generalChannel) {
+      this.ctx.logger.warn(
+        { guildId: emojiGuild.id },
+        "No #general channel found for emoji announcement",
+      );
+      return;
+    }
+
+    const result = await this.ctx.messenger.sendBuffer(
+      generalChannel.id,
+      imageBuffer,
+      `${emojiName}.png`,
+      prompt,
+    );
+
+    if (result.isErr()) {
+      this.ctx.logger.error(
+        { err: result.error, emojiName },
+        "Failed to announce new emoji",
+      );
+    }
   }
 
   private async announcePurgedEmoji(

@@ -115,36 +115,37 @@ export class RobotEmojiReactFeature implements Feature {
 
       const referenceImages =
         context.images.length > 0 ? context.images : undefined;
-      const preview = await this.emojiGenerator.generatePreview(
+      const result = await this.emojiGenerator.generate(
         prompt,
         referenceImages,
       );
 
       await this.removeProgressEmoji(message, progressReaction);
 
-      if (!preview) {
+      if (!result) {
         this.ctx.logger.error(
           { messageId: message.id },
-          "Failed to generate emoji preview",
+          "Failed to generate emoji",
         );
         return;
       }
 
-      const previewId =
-        await this.emojiGenerator.postPreviewWithButtons(preview);
+      const emojiFormat = result.emoji.animated
+        ? `<a:${result.emoji.name}:${result.emoji.id}>`
+        : `<:${result.emoji.name}:${result.emoji.id}>`;
 
-      if (!previewId) {
-        this.ctx.logger.error(
-          { messageId: message.id },
-          "Failed to post emoji preview",
+      try {
+        await message.react(emojiFormat);
+        this.ctx.logger.info(
+          { messageId: message.id, emojiName: result.name },
+          "Reacted with generated emoji",
         );
-        return;
+      } catch (error) {
+        this.ctx.logger.error(
+          { err: error },
+          "Failed to react with generated emoji",
+        );
       }
-
-      this.ctx.logger.info(
-        { messageId: message.id, previewId, emojiName: preview.name },
-        "Posted emoji preview with buttons",
-      );
     } catch (error) {
       this.ctx.logger.error({ err: error }, "Error in emoji generation flow");
       await this.removeProgressEmoji(message, progressReaction);
