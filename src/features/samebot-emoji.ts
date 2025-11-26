@@ -218,6 +218,8 @@ export class SamebotEmojiFeature implements Feature {
       newPreview,
       newPreviewId,
     );
+
+    await interaction.deleteReply();
   }
 
   private async handleCancelButton(interaction: ButtonInteraction) {
