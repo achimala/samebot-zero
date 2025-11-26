@@ -169,7 +169,7 @@ export class ConversationFeature implements Feature {
 
     const existingMessageIds = new Set(context.history.map((msg) => msg.id));
     if (existingMessageIds.has(message.id)) {
-      context.history = context.history.slice(-12);
+      context.history = context.history.slice(-50);
       this.contexts.set(key, context);
       return;
     }
@@ -180,7 +180,7 @@ export class ConversationFeature implements Feature {
     );
     const agentMessage = this.toAgentMessage(incomingMessage);
     context.history.push(agentMessage);
-    context.history = context.history.slice(-12);
+    context.history = context.history.slice(-50);
     this.contexts.set(key, context);
 
     const isMainChannel = message.channelId === this.ctx.config.mainChannelId;
@@ -241,7 +241,7 @@ export class ConversationFeature implements Feature {
       }
     }
 
-    context.history = context.history.slice(-12);
+    context.history = context.history.slice(-50);
     context.lastResponseAt = Date.now();
     this.contexts.set(key, context);
   }
@@ -290,7 +290,7 @@ export class ConversationFeature implements Feature {
       if (newMessages.length > 0) {
         context.history.push(...newMessages);
         context.history.sort((a, b) => a.timestamp - b.timestamp);
-        context.history = context.history.slice(-12);
+        context.history = context.history.slice(-50);
       }
     } catch (error) {
       this.ctx.logger.error(
@@ -384,7 +384,7 @@ export class ConversationFeature implements Feature {
       if (newMessages.length > 0) {
         context.history.push(...newMessages);
         context.history.sort((a, b) => a.timestamp - b.timestamp);
-        context.history = context.history.slice(-6);
+        context.history = context.history.slice(-50);
         this.contexts.set(key, context);
 
         const agentContext = this.toAgentContext(context);

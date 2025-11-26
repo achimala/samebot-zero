@@ -80,6 +80,64 @@ export class DiscordAdapter {
     );
   }
 
+  async sendPlaceholderMessage(
+    channelId: string,
+    prompt: string,
+  ): Promise<{ messageId: string } | null> {
+    const progressIndicators = ["⏳", "🎨", "✨"];
+    const indicator =
+      progressIndicators[Math.floor(Math.random() * progressIndicators.length)];
+    const placeholderText = `${indicator} generating: "${prompt}"`;
+
+    const result = await this.messenger.sendToChannelWithId(
+      channelId,
+      placeholderText,
+    );
+
+    return result.match(
+      (value) => ({ messageId: value.messageId }),
+      () => null,
+    );
+  }
+
+  async editMessageWithImage(
+    channelId: string,
+    messageId: string,
+    buffer: Buffer,
+    filename: string,
+  ): Promise<ToolResult> {
+    const result = await this.messenger.editMessageWithFiles(
+      channelId,
+      messageId,
+      buffer,
+      filename,
+    );
+
+    return result.match(
+      () => ({
+        success: true as const,
+        message: "Image updated successfully",
+      }),
+      (error) => ({ success: false as const, error: error.message }),
+    );
+  }
+
+  async editMessage(
+    channelId: string,
+    messageId: string,
+    content: string,
+  ): Promise<ToolResult> {
+    const result = await this.messenger.editMessage(channelId, messageId, content);
+
+    return result.match(
+      () => ({
+        success: true as const,
+        message: "Message updated successfully",
+      }),
+      (error) => ({ success: false as const, error: error.message }),
+    );
+  }
+
   resolveEmoji(emojiInput: string): string | null {
     const trimmed = emojiInput.trim();
 
