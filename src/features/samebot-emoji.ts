@@ -146,7 +146,10 @@ export class SamebotEmojiFeature implements Feature {
   }
 
   private async handleRerollModal(interaction: ModalSubmitInteraction) {
-    const customIdWithoutPrefix = interaction.customId.replace("emoji-reroll-modal-", "");
+    const customIdWithoutPrefix = interaction.customId.replace(
+      "emoji-reroll-modal-",
+      "",
+    );
     const lastHyphenIndex = customIdWithoutPrefix.lastIndexOf("-");
     if (lastHyphenIndex === -1) {
       await interaction.reply({
@@ -177,6 +180,8 @@ export class SamebotEmojiFeature implements Feature {
 
     await interaction.deferReply({ ephemeral: true });
 
+    const modeValues = interaction.fields.getStringSelectValues("emoji-mode");
+    const selectedMode = modeValues[0] ?? "fresh";
     const nameInput = interaction.fields.getTextInputValue("emoji-name");
     const promptInput = interaction.fields.getTextInputValue("emoji-prompt");
 
@@ -189,16 +194,28 @@ export class SamebotEmojiFeature implements Feature {
       return;
     }
 
+    const isEditMode = selectedMode === "edit";
+    const statusMessage = isEditMode ? "Editing..." : "Rerolling...";
+
     await message.edit({
-      content: `**:${preview.name}:** ${preview.prompt}\n🔄 Rerolling...`,
+      content: `**:${preview.name}:** ${preview.prompt}\n🔄 ${statusMessage}`,
       components: [],
     });
 
     this.emojiGenerator.deletePendingPreview(previewId);
 
+    let referenceImages = preview.referenceImages ?? [];
+    if (isEditMode) {
+      const previousImageAsReference: ReferenceImage = {
+        data: preview.buffer.toString("base64"),
+        mimeType: "image/png",
+      };
+      referenceImages = [previousImageAsReference, ...referenceImages];
+    }
+
     const newPreview = await this.emojiGenerator.generatePreview(
       promptInput,
-      preview.referenceImages,
+      referenceImages.length > 0 ? referenceImages : undefined,
       nameInput,
     );
 

@@ -3,9 +3,6 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
   type Guild,
   type GuildEmoji,
   type TextChannel,
@@ -196,35 +193,64 @@ export class EmojiGenerator {
     messageId: string,
     currentName: string,
     currentPrompt: string,
-  ): ModalBuilder {
-    const modal = new ModalBuilder()
-      .setCustomId(`emoji-reroll-modal-${previewId}-${messageId}`)
-      .setTitle("Edit Emoji");
-
-    const nameInput = new TextInputBuilder()
-      .setCustomId("emoji-name")
-      .setLabel("Emoji Name")
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder("Enter emoji name (2-32 chars, lowercase alphanumeric and underscores)")
-      .setRequired(true)
-      .setMaxLength(32)
-      .setValue(currentName);
-
-    const promptInput = new TextInputBuilder()
-      .setCustomId("emoji-prompt")
-      .setLabel("Prompt")
-      .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder("Enter image generation prompt")
-      .setRequired(true)
-      .setMaxLength(500)
-      .setValue(currentPrompt);
-
-    const nameRow = new ActionRowBuilder<TextInputBuilder>().addComponents(nameInput);
-    const promptRow = new ActionRowBuilder<TextInputBuilder>().addComponents(promptInput);
-
-    modal.addComponents(nameRow, promptRow);
-
-    return modal;
+  ) {
+    return {
+      custom_id: `emoji-reroll-modal-${previewId}-${messageId}`,
+      title: "Reroll Emoji",
+      components: [
+        {
+          type: 18,
+          label: "Generation Mode",
+          component: {
+            type: 3,
+            custom_id: "emoji-mode",
+            placeholder: "Choose how to generate...",
+            options: [
+              {
+                label: "Start Fresh",
+                value: "fresh",
+                description: "Generate a completely new image",
+                default: true,
+              },
+              {
+                label: "Edit Previous",
+                value: "edit",
+                description: "Modify the current image",
+              },
+            ],
+          },
+        },
+        {
+          type: 18,
+          label: "Emoji Name",
+          component: {
+            type: 4,
+            custom_id: "emoji-name",
+            style: 1,
+            placeholder:
+              "Enter emoji name (2-32 chars, lowercase alphanumeric and underscores)",
+            required: true,
+            max_length: 32,
+            value: currentName,
+          },
+        },
+        {
+          type: 18,
+          label: "Prompt",
+          description:
+            "Enter image generation prompt (or edit instructions if editing)",
+          component: {
+            type: 4,
+            custom_id: "emoji-prompt",
+            style: 2,
+            placeholder: "Describe the emoji you want to create...",
+            required: true,
+            max_length: 500,
+            value: currentPrompt,
+          },
+        },
+      ],
+    };
   }
 
   async saveEmoji(preview: EmojiPreview): Promise<GeneratedEmoji | null> {
@@ -269,6 +295,11 @@ export class EmojiGenerator {
       .setLabel("Save")
       .setStyle(ButtonStyle.Success);
 
+    const editButton = new ButtonBuilder()
+      .setCustomId(`emoji-edit-${newPreviewId}`)
+      .setLabel("Edit")
+      .setStyle(ButtonStyle.Primary);
+
     const rerollButton = new ButtonBuilder()
       .setCustomId(`emoji-reroll-${newPreviewId}`)
       .setLabel("Reroll")
@@ -281,6 +312,7 @@ export class EmojiGenerator {
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       saveButton,
+      editButton,
       rerollButton,
       cancelButton,
     );
