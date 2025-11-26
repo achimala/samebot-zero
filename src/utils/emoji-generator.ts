@@ -3,6 +3,9 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   type Guild,
   type GuildEmoji,
   type TextChannel,
@@ -46,6 +49,7 @@ export class EmojiGenerator {
   async generatePreview(
     prompt: string,
     referenceImages?: ReferenceImage[],
+    customName?: string,
   ): Promise<EmojiPreview | null> {
     let effectivePrompt = prompt;
     let effectiveReferenceImages = referenceImages;
@@ -59,15 +63,20 @@ export class EmojiGenerator {
       }
     }
 
-    const nameResult = await this.generateEmojiName(prompt);
-    if (nameResult.isErr()) {
-      this.ctx.logger.error(
-        { err: nameResult.error },
-        "Failed to generate emoji name",
-      );
-      return null;
+    let emojiName: string;
+    if (customName) {
+      emojiName = this.sanitizeEmojiName(customName);
+    } else {
+      const nameResult = await this.generateEmojiName(prompt);
+      if (nameResult.isErr()) {
+        this.ctx.logger.error(
+          { err: nameResult.error },
+          "Failed to generate emoji name",
+        );
+        return null;
+      }
+      emojiName = nameResult.value;
     }
-    const emojiName = nameResult.value;
 
     const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
       prompt: `${effectivePrompt}, solid bright magenta background (#FF00FF), suitable as a Discord emoji. Will be displayed very small, so make things clear and avoid fine details or small text`,
@@ -138,9 +147,15 @@ export class EmojiGenerator {
       .setLabel("Reroll")
       .setStyle(ButtonStyle.Secondary);
 
+    const cancelButton = new ButtonBuilder()
+      .setCustomId(`emoji-cancel-${previewId}`)
+      .setLabel("Cancel")
+      .setStyle(ButtonStyle.Danger);
+
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       saveButton,
       rerollButton,
+      cancelButton,
     );
 
     try {
@@ -174,6 +189,42 @@ export class EmojiGenerator {
 
   deletePendingPreview(previewId: string): void {
     this.pendingPreviews.delete(previewId);
+  }
+
+  createRerollModal(
+    previewId: string,
+    messageId: string,
+    currentName: string,
+    currentPrompt: string,
+  ): ModalBuilder {
+    const modal = new ModalBuilder()
+      .setCustomId(`emoji-reroll-modal-${previewId}-${messageId}`)
+      .setTitle("Edit Emoji");
+
+    const nameInput = new TextInputBuilder()
+      .setCustomId("emoji-name")
+      .setLabel("Emoji Name")
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder("Enter emoji name (2-32 chars, lowercase alphanumeric and underscores)")
+      .setRequired(true)
+      .setMaxLength(32)
+      .setValue(currentName);
+
+    const promptInput = new TextInputBuilder()
+      .setCustomId("emoji-prompt")
+      .setLabel("Prompt")
+      .setStyle(TextInputStyle.Paragraph)
+      .setPlaceholder("Enter image generation prompt")
+      .setRequired(true)
+      .setMaxLength(500)
+      .setValue(currentPrompt);
+
+    const nameRow = new ActionRowBuilder<TextInputBuilder>().addComponents(nameInput);
+    const promptRow = new ActionRowBuilder<TextInputBuilder>().addComponents(promptInput);
+
+    modal.addComponents(nameRow, promptRow);
+
+    return modal;
   }
 
   async saveEmoji(preview: EmojiPreview): Promise<GeneratedEmoji | null> {
@@ -223,9 +274,15 @@ export class EmojiGenerator {
       .setLabel("Reroll")
       .setStyle(ButtonStyle.Secondary);
 
+    const cancelButton = new ButtonBuilder()
+      .setCustomId(`emoji-cancel-${newPreviewId}`)
+      .setLabel("Cancel")
+      .setStyle(ButtonStyle.Danger);
+
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       saveButton,
       rerollButton,
+      cancelButton,
     );
 
     await message.edit({
