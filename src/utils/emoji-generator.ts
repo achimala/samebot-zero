@@ -397,6 +397,12 @@ The name must:
 - Start with a letter
 - Be descriptive of the emoji content
 - Not include words like "emoji" or "icon"
+- Exclude filler words and be as compact as possible, just preserving the most important words, usually only 3 words or less
+
+Examples:
+- "a cat on a chair" -> "cat_on_chair"
+- "mchang as a pepe" -> "mchang_pepe"
+- "cool sunglasses emoji but with tyrus's face" -> "cool_tyrus"
 
 Return only the name, no explanation.`,
           },
