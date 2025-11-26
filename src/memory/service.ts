@@ -46,6 +46,12 @@ Format each fact as a standalone statement that would make sense without the ori
 Include the person's name in each fact for clarity.
 Only extract meaningful, memorable facts that have long-term relevance - skip trivial statements or ones that only apply to the current conversation.
 If nothing memorable is said, return an empty array. Be conservative, it's perfectly OK to return an empty array if there's nothing meaningful.
+
+Do not just restate what people said or did. Extract meaningful facts about their interests, personality, significant events, etc.
+
+It is not useful to track things like "Anshu said 'hello'" or "Anshu asked Samebot to search for Apple's stock price"
+It *is* useful to track things like "Anshu likes to play video games" or "Anshu is a software engineer at Apple"
+If you cannot extract any information like those latter examples, just return an empty array, don't try to force it.
 `;
 
     const result = await this.openai.chatStructured<{ facts: ExtractedFact[] }>(
