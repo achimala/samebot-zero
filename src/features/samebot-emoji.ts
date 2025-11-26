@@ -1,4 +1,8 @@
-import type { ChatInputCommandInteraction, ButtonInteraction } from "discord.js";
+import type {
+  ChatInputCommandInteraction,
+  ButtonInteraction,
+  ModalSubmitInteraction,
+} from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import { EmojiGenerator, type ReferenceImage } from "../utils/emoji-generator";
 
@@ -21,6 +25,14 @@ export class SamebotEmojiFeature implements Feature {
           void this.handleSaveButton(interaction);
         } else if (interaction.customId.startsWith("emoji-reroll-")) {
           void this.handleRerollButton(interaction);
+        } else if (interaction.customId.startsWith("emoji-cancel-")) {
+          void this.handleCancelButton(interaction);
+        }
+        return;
+      }
+      if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith("emoji-reroll-modal-")) {
+          void this.handleRerollModal(interaction);
         }
         return;
       }
@@ -123,9 +135,61 @@ export class SamebotEmojiFeature implements Feature {
       return;
     }
 
-    await interaction.deferUpdate();
+    const modal = this.emojiGenerator.createRerollModal(
+      previewId,
+      interaction.message.id,
+      preview.name,
+      preview.prompt,
+    );
 
-    await interaction.message.edit({
+    await interaction.showModal(modal);
+  }
+
+  private async handleRerollModal(interaction: ModalSubmitInteraction) {
+    const customIdWithoutPrefix = interaction.customId.replace("emoji-reroll-modal-", "");
+    const lastHyphenIndex = customIdWithoutPrefix.lastIndexOf("-");
+    if (lastHyphenIndex === -1) {
+      await interaction.reply({
+        content: "Invalid modal interaction.",
+        ephemeral: true,
+      });
+      return;
+    }
+    const previewId = customIdWithoutPrefix.substring(0, lastHyphenIndex);
+    const messageId = customIdWithoutPrefix.substring(lastHyphenIndex + 1);
+    const preview = this.emojiGenerator.getPendingPreview(previewId);
+
+    if (!preview) {
+      await interaction.reply({
+        content: "This emoji preview has expired or already been processed.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (!interaction.channel) {
+      await interaction.reply({
+        content: "Unable to access the channel.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const nameInput = interaction.fields.getTextInputValue("emoji-name");
+    const promptInput = interaction.fields.getTextInputValue("emoji-prompt");
+
+    const message = await interaction.channel.messages.fetch(messageId);
+    if (!message) {
+      await interaction.followUp({
+        content: "Unable to find the original message.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await message.edit({
       content: `**:${preview.name}:** ${preview.prompt}\n🔄 Rerolling...`,
       components: [],
     });
@@ -133,12 +197,13 @@ export class SamebotEmojiFeature implements Feature {
     this.emojiGenerator.deletePendingPreview(previewId);
 
     const newPreview = await this.emojiGenerator.generatePreview(
-      preview.prompt,
+      promptInput,
       preview.referenceImages,
+      nameInput,
     );
 
     if (!newPreview) {
-      await interaction.message.edit({
+      await message.edit({
         content: `**:${preview.name}:** ${preview.prompt}\n❌ Failed to generate new preview`,
         components: [],
       });
@@ -149,10 +214,29 @@ export class SamebotEmojiFeature implements Feature {
     this.emojiGenerator.setPendingPreview(newPreviewId, newPreview);
 
     await this.emojiGenerator.updatePreviewMessage(
-      interaction.message,
+      message,
       newPreview,
       newPreviewId,
     );
+  }
+
+  private async handleCancelButton(interaction: ButtonInteraction) {
+    const previewId = interaction.customId.replace("emoji-cancel-", "");
+    const preview = this.emojiGenerator.getPendingPreview(previewId);
+
+    if (!preview) {
+      await interaction.reply({
+        content: "This emoji preview has expired or already been processed.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.deferUpdate();
+
+    this.emojiGenerator.deletePendingPreview(previewId);
+
+    await interaction.message.delete();
   }
 
   private async fetchImageAsBase64(url: string): Promise<string | null> {
