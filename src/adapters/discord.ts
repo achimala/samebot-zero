@@ -87,7 +87,7 @@ export class DiscordAdapter {
     const progressIndicators = ["⏳", "🎨", "✨"];
     const indicator =
       progressIndicators[Math.floor(Math.random() * progressIndicators.length)];
-    const placeholderText = `${indicator} generating: "${prompt}"`;
+    const placeholderText = `${indicator} generating...`;
 
     const result = await this.messenger.sendToChannelWithId(
       channelId,
@@ -105,12 +105,14 @@ export class DiscordAdapter {
     messageId: string,
     buffer: Buffer,
     filename: string,
+    description?: string,
   ): Promise<ToolResult> {
     const result = await this.messenger.editMessageWithFiles(
       channelId,
       messageId,
       buffer,
       filename,
+      description,
     );
 
     return result.match(
@@ -127,7 +129,11 @@ export class DiscordAdapter {
     messageId: string,
     content: string,
   ): Promise<ToolResult> {
-    const result = await this.messenger.editMessage(channelId, messageId, content);
+    const result = await this.messenger.editMessage(
+      channelId,
+      messageId,
+      content,
+    );
 
     return result.match(
       () => ({

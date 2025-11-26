@@ -101,6 +101,7 @@ export class EmojiGenerator {
         createdEmoji.toString(),
         emojiName,
         processedBuffer,
+        prompt,
       );
 
       return { emoji: createdEmoji, name: emojiName };
@@ -138,6 +139,7 @@ export class EmojiGenerator {
     emojiString: string,
     emojiName: string,
     imageBuffer: Buffer,
+    prompt: string,
   ) {
     const generalChannel = this.getGeneralChannel(emojiGuild);
 
@@ -153,7 +155,7 @@ export class EmojiGenerator {
       generalChannel.id,
       imageBuffer,
       `${emojiName}.png`,
-      `New emoji created: ${emojiString} \`:${emojiName}:\``,
+      prompt,
     );
 
     if (result.isErr()) {

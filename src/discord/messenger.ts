@@ -41,9 +41,7 @@ export class DiscordMessenger {
     ).andThen((channel) => {
       const sendableChannel = this.assertSendableChannel(channel);
       if (sendableChannel === null) {
-        return err(
-          Errors.discord("Channel does not support sending messages"),
-        );
+        return err(Errors.discord("Channel does not support sending messages"));
       }
       const sendPromise: Promise<Message> = sendableChannel.send(content);
       return ResultAsync.fromPromise(sendPromise, (error) => {
@@ -53,11 +51,7 @@ export class DiscordMessenger {
     });
   }
 
-  editMessage(
-    channelId: string,
-    messageId: string,
-    content: string,
-  ) {
+  editMessage(channelId: string, messageId: string, content: string) {
     return ResultAsync.fromPromise(
       this.fetchTextChannel(channelId),
       (error) => {
@@ -67,9 +61,7 @@ export class DiscordMessenger {
     ).andThen((channel) => {
       const sendableChannel = this.assertSendableChannel(channel);
       if (sendableChannel === null) {
-        return err(
-          Errors.discord("Channel does not support sending messages"),
-        );
+        return err(Errors.discord("Channel does not support sending messages"));
       }
       return ResultAsync.fromPromise(
         sendableChannel.messages.fetch(messageId),
@@ -92,6 +84,7 @@ export class DiscordMessenger {
     messageId: string,
     buffer: Buffer,
     filename: string,
+    description?: string,
   ) {
     return ResultAsync.fromPromise(
       this.fetchTextChannel(channelId),
@@ -102,9 +95,7 @@ export class DiscordMessenger {
     ).andThen((channel) => {
       const sendableChannel = this.assertSendableChannel(channel);
       if (sendableChannel === null) {
-        return err(
-          Errors.discord("Channel does not support sending messages"),
-        );
+        return err(Errors.discord("Channel does not support sending messages"));
       }
       return ResultAsync.fromPromise(
         sendableChannel.messages.fetch(messageId),
@@ -113,13 +104,20 @@ export class DiscordMessenger {
           return Errors.discord("Unable to fetch message");
         },
       ).andThen((message) => {
+        const filePayload: {
+          attachment: Buffer;
+          name: string;
+          description?: string;
+        } = {
+          attachment: buffer,
+          name: filename,
+        };
+        if (description !== undefined) {
+          filePayload.description = description;
+        }
         const editPromise: Promise<Message> = message.edit({
-          files: [
-            {
-              attachment: buffer,
-              name: filename,
-            },
-          ],
+          content: "",
+          files: [filePayload],
         });
         return ResultAsync.fromPromise(editPromise, (error) => {
           this.logger.error({ err: error }, "Failed to edit message");
@@ -157,12 +155,9 @@ export class DiscordMessenger {
       if (description !== undefined) {
         filePayload.description = description;
       }
-      const sendOptions: { files: (typeof filePayload)[]; content?: string } = {
+      const sendOptions: { files: (typeof filePayload)[] } = {
         files: [filePayload],
       };
-      if (description !== undefined) {
-        sendOptions.content = description;
-      }
       const sendableChannel = this.assertSendableChannel(channel);
       if (sendableChannel === null) {
         return err(Errors.discord("Channel does not support sending messages"));

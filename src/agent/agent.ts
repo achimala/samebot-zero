@@ -568,6 +568,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 placeholderMessage.messageId,
                 buffer,
                 "samebot-image.png",
+                prompt,
               );
               if (editResult.success) {
                 resultMessage = `Successfully generated and sent image for: ${prompt}`;
@@ -580,6 +581,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                   channelId,
                   buffer,
                   "samebot-image.png",
+                  prompt,
                 );
                 if (sendResult.success) {
                   resultMessage = `Successfully generated and sent image for: ${prompt}`;
@@ -592,6 +594,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 channelId,
                 buffer,
                 "samebot-image.png",
+                prompt,
               );
               if (sendResult.success) {
                 resultMessage = `Successfully generated and sent image for: ${prompt}`;
