@@ -29,7 +29,7 @@ export class UsaCowboyFeature implements Feature {
       message.channelId,
       {
         systemMessage:
-          "Generate a unique ASCII art cowboy that is contextually relevant to the conversation. Make it creative and varied each time. Include elements like a hat, boots, maybe a lasso or horse. Keep it compact enough to fit in a Discord message (under 2000 characters). Use the conversation context to make the cowboy relevant to what's being discussed. Respond with only the ASCII art, nothing else.",
+          "Generate a unique ASCII art cowboy that is contextually relevant to the conversation. Make it creative and varied each time. Include elements like a hat, boots, maybe a lasso or horse. Keep each line short enough to fit on a single line on Discord mobile (maximum 35 characters per line). Use the conversation context to make the cowboy relevant to what's being discussed. Respond with only the ASCII art, nothing else.",
         userMessage:
           "Generate a contextually relevant ASCII art cowboy based on this conversation.",
       },
