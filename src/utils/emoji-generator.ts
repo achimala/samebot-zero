@@ -60,20 +60,20 @@ export class EmojiGenerator {
       }
     }
 
-    let emojiName: string;
-    if (customName) {
-      emojiName = this.sanitizeEmojiName(customName);
-    } else {
-      const nameResult = await this.generateEmojiName(prompt);
-      if (nameResult.isErr()) {
-        this.ctx.logger.error(
-          { err: nameResult.error },
-          "Failed to generate emoji name",
-        );
-        return null;
-      }
-      emojiName = nameResult.value;
-    }
+    // Run name generation and image generation in parallel
+    const namePromise: Promise<string | null> = customName
+      ? Promise.resolve(this.sanitizeEmojiName(customName))
+      : (async () => {
+          const result = await this.generateEmojiName(prompt);
+          if (result.isErr()) {
+            this.ctx.logger.error(
+              { err: result.error },
+              "Failed to generate emoji name",
+            );
+            return null;
+          }
+          return result.value;
+        })();
 
     const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
       prompt: `${effectivePrompt}, solid bright magenta background (#FF00FF), suitable as a Discord emoji. Will be displayed very small, so make things clear and avoid fine details or small text`,
@@ -83,7 +83,16 @@ export class EmojiGenerator {
     if (effectiveReferenceImages && effectiveReferenceImages.length > 0) {
       imageOptions.referenceImages = effectiveReferenceImages;
     }
-    const imageResult = await this.ctx.openai.generateImage(imageOptions);
+    const imagePromise = this.ctx.openai.generateImage(imageOptions);
+
+    const [emojiName, imageResult] = await Promise.all([
+      namePromise,
+      imagePromise,
+    ]);
+
+    if (!emojiName) {
+      return null;
+    }
 
     if (imageResult.isErr()) {
       this.ctx.logger.error(
