@@ -527,6 +527,11 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           referenceImages = built.referenceImages;
         }
 
+        const placeholderMessage = await this.adapter.sendPlaceholderMessage(
+          channelId,
+          prompt,
+        );
+
         const imageOptions: {
           prompt: string;
           referenceImages?: Array<{ data: string; mimeType: string }>;
@@ -557,24 +562,57 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         let resultMessage = "";
         await imageResult.match(
           async ({ buffer }) => {
-            const sendResult = await this.adapter.sendImage(
-              channelId,
-              buffer,
-              "samebot-image.png",
-              prompt,
-            );
-            if (sendResult.success) {
-              resultMessage = `Successfully generated and sent image for: ${prompt}`;
-            } else {
-              this.logger.error(
-                { err: sendResult.error },
-                "Failed to send image",
+            if (placeholderMessage) {
+              const editResult = await this.adapter.editMessageWithImage(
+                channelId,
+                placeholderMessage.messageId,
+                buffer,
+                "samebot-image.png",
               );
-              resultMessage = `Generated image but failed to send it`;
+              if (editResult.success) {
+                resultMessage = `Successfully generated and sent image for: ${prompt}`;
+              } else {
+                this.logger.error(
+                  { err: editResult.error },
+                  "Failed to edit message with image",
+                );
+                const sendResult = await this.adapter.sendImage(
+                  channelId,
+                  buffer,
+                  "samebot-image.png",
+                );
+                if (sendResult.success) {
+                  resultMessage = `Successfully generated and sent image for: ${prompt}`;
+                } else {
+                  resultMessage = `Generated image but failed to send it`;
+                }
+              }
+            } else {
+              const sendResult = await this.adapter.sendImage(
+                channelId,
+                buffer,
+                "samebot-image.png",
+              );
+              if (sendResult.success) {
+                resultMessage = `Successfully generated and sent image for: ${prompt}`;
+              } else {
+                this.logger.error(
+                  { err: sendResult.error },
+                  "Failed to send image",
+                );
+                resultMessage = `Generated image but failed to send it`;
+              }
             }
           },
           async (error) => {
             this.logger.error({ err: error }, "Image generation failed");
+            if (placeholderMessage) {
+              await this.adapter.editMessage(
+                channelId,
+                placeholderMessage.messageId,
+                `failed to generate image: ${error.message}`,
+              );
+            }
             resultMessage = `Failed to generate image: ${error.message}`;
           },
         );

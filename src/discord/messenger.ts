@@ -31,6 +31,104 @@ export class DiscordMessenger {
     });
   }
 
+  sendToChannelWithId(channelId: string, content: string) {
+    return ResultAsync.fromPromise(
+      this.fetchTextChannel(channelId),
+      (error) => {
+        this.logger.error({ err: error }, "Failed to fetch channel");
+        return Errors.discord("Unable to fetch channel");
+      },
+    ).andThen((channel) => {
+      const sendableChannel = this.assertSendableChannel(channel);
+      if (sendableChannel === null) {
+        return err(
+          Errors.discord("Channel does not support sending messages"),
+        );
+      }
+      const sendPromise: Promise<Message> = sendableChannel.send(content);
+      return ResultAsync.fromPromise(sendPromise, (error) => {
+        this.logger.error({ err: error }, "Failed to send message");
+        return Errors.discord("Unable to send message");
+      }).map((message) => ({ messageId: message.id }));
+    });
+  }
+
+  editMessage(
+    channelId: string,
+    messageId: string,
+    content: string,
+  ) {
+    return ResultAsync.fromPromise(
+      this.fetchTextChannel(channelId),
+      (error) => {
+        this.logger.error({ err: error }, "Failed to fetch channel");
+        return Errors.discord("Unable to fetch channel");
+      },
+    ).andThen((channel) => {
+      const sendableChannel = this.assertSendableChannel(channel);
+      if (sendableChannel === null) {
+        return err(
+          Errors.discord("Channel does not support sending messages"),
+        );
+      }
+      return ResultAsync.fromPromise(
+        sendableChannel.messages.fetch(messageId),
+        (error) => {
+          this.logger.error({ err: error }, "Failed to fetch message");
+          return Errors.discord("Unable to fetch message");
+        },
+      ).andThen((message) => {
+        const editPromise: Promise<Message> = message.edit(content);
+        return ResultAsync.fromPromise(editPromise, (error) => {
+          this.logger.error({ err: error }, "Failed to edit message");
+          return Errors.discord("Unable to edit message");
+        }).map<void>(() => undefined);
+      });
+    });
+  }
+
+  editMessageWithFiles(
+    channelId: string,
+    messageId: string,
+    buffer: Buffer,
+    filename: string,
+  ) {
+    return ResultAsync.fromPromise(
+      this.fetchTextChannel(channelId),
+      (error) => {
+        this.logger.error({ err: error }, "Failed to fetch channel");
+        return Errors.discord("Unable to fetch channel");
+      },
+    ).andThen((channel) => {
+      const sendableChannel = this.assertSendableChannel(channel);
+      if (sendableChannel === null) {
+        return err(
+          Errors.discord("Channel does not support sending messages"),
+        );
+      }
+      return ResultAsync.fromPromise(
+        sendableChannel.messages.fetch(messageId),
+        (error) => {
+          this.logger.error({ err: error }, "Failed to fetch message");
+          return Errors.discord("Unable to fetch message");
+        },
+      ).andThen((message) => {
+        const editPromise: Promise<Message> = message.edit({
+          files: [
+            {
+              attachment: buffer,
+              name: filename,
+            },
+          ],
+        });
+        return ResultAsync.fromPromise(editPromise, (error) => {
+          this.logger.error({ err: error }, "Failed to edit message");
+          return Errors.discord("Unable to edit message");
+        }).map<void>(() => undefined);
+      });
+    });
+  }
+
   replyToMessage(message: Message, content: string) {
     return this.sendContent(message.channel, content, message);
   }
