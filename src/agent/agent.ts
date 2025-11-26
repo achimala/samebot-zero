@@ -194,14 +194,7 @@ export class Agent {
     };
 
     const messages: Array<ChatMessage | ToolMessage> = [
-      {
-        role: "system",
-        content: modelContext.systemMessage,
-      },
-      {
-        role: "user",
-        content: modelContext.userMessage,
-      },
+      ...modelContext.messages,
     ];
 
     const toolCallsMade: ToolCall[] = [];
@@ -416,8 +409,7 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
   }
 
   private async buildModelContext(context: AgentContext): Promise<{
-    systemMessage: string;
-    userMessage: string;
+    messages: ChatMessage[];
     contextWithIds: { text: string; references: MessageReference[] };
   }> {
     const contextWithIds = this.formatContextWithIds(context);
@@ -446,7 +438,7 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
 
 You have tools available to:
 - react: React to a message with an emoji
-- generate_image: Generate an image with a prompt
+- generate_image: Generate an image with a prompt (if the user shares an image, you can use it as a reference for generation/modification)
 - search_memory: Search your memory for information you don't currently recall
 - get_scrapbook_memory: Get a random memorable quote from the scrapbook (POSTS TO CHANNEL)
 - search_scrapbook: Search for specific memorable quotes (POSTS TO CHANNEL)
@@ -460,11 +452,44 @@ Your final text response will be sent as a message to the channel. An empty resp
 Message references in context (use these IDs when reacting):
 ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}`;
 
-    const userMessage = `Recent conversation:\n${contextWithIds.text}`;
+    const messages: ChatMessage[] = [
+      {
+        role: "system",
+        content: systemMessage,
+      },
+    ];
+
+    for (const message of context.history) {
+      const now = Date.now();
+      const timeAgo = Math.round((now - message.timestamp) / 1000);
+      const timeAgoText =
+        timeAgo < 60
+          ? `${timeAgo}s ago`
+          : timeAgo < 3600
+            ? `${Math.round(timeAgo / 60)}m ago`
+            : `${Math.round(timeAgo / 3600)}h ago`;
+
+      const prefix = message.author ? `${message.author}: ` : "";
+      const contentWithMeta = `[${timeAgoText}] [${message.id}] ${prefix}${message.content}`;
+
+      const chatMessage: ChatMessage = {
+        role: message.role === "assistant" ? "assistant" : "user",
+        content: contentWithMeta,
+      };
+
+      if (
+        message.role === "user" &&
+        message.images &&
+        message.images.length > 0
+      ) {
+        chatMessage.images = message.images;
+      }
+
+      messages.push(chatMessage);
+    }
 
     return {
-      systemMessage,
-      userMessage,
+      messages,
       contextWithIds,
     };
   }
@@ -515,16 +540,19 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           | undefined;
 
         let effectivePrompt = prompt;
-        let referenceImages:
-          | Array<{ data: string; mimeType: string }>
-          | undefined;
+        const referenceImages: Array<{ data: string; mimeType: string }> = [];
+
+        const conversationImages = this.extractConversationImages(agentContext);
+        referenceImages.push(...conversationImages);
 
         const resolution = await this.entityResolver.resolve(prompt);
         if (resolution) {
           const built =
             this.entityResolver.buildPromptWithReferences(resolution);
           effectivePrompt = built.textPrompt;
-          referenceImages = built.referenceImages;
+          if (built.referenceImages) {
+            referenceImages.push(...built.referenceImages);
+          }
         }
 
         const placeholderMessage = await this.adapter.sendPlaceholderMessage(
@@ -548,7 +576,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         } = {
           prompt: effectivePrompt,
         };
-        if (referenceImages !== undefined) {
+        if (referenceImages.length > 0) {
           imageOptions.referenceImages = referenceImages;
         }
         if (aspectRatio !== undefined) {
@@ -706,6 +734,28 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       default:
         return `Unknown tool: ${toolCall.name}`;
     }
+  }
+
+  private extractConversationImages(
+    context: AgentContext,
+  ): Array<{ data: string; mimeType: string }> {
+    const images: Array<{ data: string; mimeType: string }> = [];
+
+    for (const message of context.history) {
+      if (message.images && message.images.length > 0) {
+        for (const dataUri of message.images) {
+          const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
+          if (match && match[1] && match[2]) {
+            images.push({
+              mimeType: match[1],
+              data: match[2],
+            });
+          }
+        }
+      }
+    }
+
+    return images;
   }
 
   private formatScrapbookMemory(memory: {
