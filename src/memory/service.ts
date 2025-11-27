@@ -48,6 +48,7 @@ Only extract meaningful, memorable facts that have long-term relevance - skip tr
 If nothing memorable is said, return an empty array. Be conservative, it's perfectly OK to return an empty array if there's nothing meaningful.
 
 Do not just restate what people said or did. Extract meaningful facts about their interests, personality, significant events, etc.
+Ensure each fact is fully self-contained and includes all relevant context so it stands alone.
 
 It is not useful to track things like "Anshu said 'hello'" or "Anshu asked Samebot to search for Apple's stock price"
 It *is* useful to track things like "Anshu likes to play video games" or "Anshu is a software engineer at Apple"
@@ -85,7 +86,7 @@ If you cannot extract any information like those latter examples, just return an
           additionalProperties: false,
         },
         schemaName: "extractedFacts",
-        model: "gpt-5-mini",
+        model: "gpt-5.1",
       },
     );
 
