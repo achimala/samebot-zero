@@ -153,10 +153,7 @@ export class ScrapbookFeature implements Feature {
 
       await imageResult.match(
         async ({ buffer }) => {
-          await this.ctx.messenger.sendToChannel(
-            channelId,
-            formattedMemory,
-          );
+          await this.ctx.messenger.sendToChannel(channelId, formattedMemory);
           await this.ctx.messenger.sendBuffer(
             channelId,
             buffer,
@@ -168,17 +165,11 @@ export class ScrapbookFeature implements Feature {
             { err: error },
             "Failed to generate scrapbook image, sending text only",
           );
-          await this.ctx.messenger.sendToChannel(
-            channelId,
-            formattedMemory,
-          );
+          await this.ctx.messenger.sendToChannel(channelId, formattedMemory);
         },
       );
     } else {
-      await this.ctx.messenger.sendToChannel(
-        channelId,
-        formattedMemory,
-      );
+      await this.ctx.messenger.sendToChannel(channelId, formattedMemory);
     }
   }
 
