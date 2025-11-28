@@ -158,6 +158,7 @@ export class ScrapbookFeature implements Feature {
             channelId,
             buffer,
             "scrapbook-memory.png",
+            imagePrompt,
           );
         },
         async (error) => {
