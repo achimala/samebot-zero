@@ -181,18 +181,23 @@ export class ScrapbookFeature implements Feature {
   private async generateImagePromptForMemory(
     memory: ScrapbookMemory,
   ): Promise<string | null> {
+    const contextText = memory.context
+      .map((m) => `<${m.author}> ${m.content}`)
+      .join("\n");
+
     const result = await this.ctx.openai.chatStructured<{ prompt: string }>({
       messages: [
         {
           role: "system",
           content: `You create artistic image prompts for nostalgic chat memories.
-Given a memorable chat quote, create a creative, whimsical image prompt that captures the essence or humor of the moment.
+Given a memorable chat quote and its full conversation context, create a creative, whimsical image prompt that captures the scene and essence of the moment.
 The image should be surreal, artistic, and evocative - not a literal depiction.
+Use the entire conversation context to understand the scene, mood, and setting of the moment.
 Keep the prompt concise (under 100 words).`,
         },
         {
           role: "user",
-          content: `Create an image prompt for this memory:\n"${memory.keyMessage}" - ${memory.author}`,
+          content: `Create an image prompt for this memory. Use the full conversation context to capture the scene:\n\nConversation context:\n${contextText}\n\nKey quote: "${memory.keyMessage}" - ${memory.author}`,
         },
       ],
       schema: {
