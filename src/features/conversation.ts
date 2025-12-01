@@ -224,12 +224,12 @@ export class ConversationFeature implements Feature {
 
     let response: { text: string | null; toolCallsMade: unknown[] };
     if (Math.random() < SAY_SAME_PROBABILITY) {
-      const shouldSaySame = await this.agent.shouldSaySame(
+      const sameCheck = await this.agent.shouldSaySame(
         agentContext,
         incomingMessage.content || "(silent)",
       );
-      if (shouldSaySame) {
-        response = { text: "same", toolCallsMade: [] };
+      if (sameCheck.shouldSaySame && sameCheck.response) {
+        response = { text: sameCheck.response, toolCallsMade: [] };
       } else {
         response = await this.agent.generateResponse(
           agentContext,

@@ -317,13 +317,13 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
   async shouldSaySame(
     context: AgentContext,
     latestMessageContent: string,
-  ): Promise<boolean> {
+  ): Promise<{ shouldSaySame: boolean; response?: string }> {
     const contextText = this.formatContextText(context);
 
     const systemMessage = `${PERSONA}
-You are deciding whether saying "same" (or a similar brief agreement) would be contextually appropriate and natural.
+You are deciding whether saying "same" or a similar brief agreement would be contextually appropriate and natural.
 
-Say "same" when:
+Say "same" (or similar) when:
 - Someone expresses a relatable feeling, experience, or opinion
 - Someone shares something you can relate to
 - The conversation is casual and friendly
@@ -335,42 +335,56 @@ Do NOT say "same" when:
 - It would be awkward or inappropriate
 - You've already said "same" recently in the conversation
 
-Be conservative - only return true if saying "same" would feel natural and appropriate.`;
+If appropriate, provide a brief response (1-3 words max). Examples: "same", "same here", "yeah same", "literally same", "mood", "big mood", "felt", "relatable", etc. Keep it brief and natural. Use lowercase.`;
 
-    const response = await this.openai.chatStructured<{ shouldSaySame: boolean }>(
-      {
-        messages: [
-          {
-            role: "system",
-            content: systemMessage,
-          },
-          {
-            role: "user",
-            content: `Conversation context:\n${contextText}\n\nMost recent message:\n${latestMessageContent}\n\nWould saying "same" be contextually appropriate here?`,
-          },
-        ],
-        schema: {
-          type: "object",
-          properties: {
-            shouldSaySame: {
-              type: "boolean",
-              description:
-                "Whether saying 'same' would be contextually appropriate",
-            },
-          },
-          required: ["shouldSaySame"],
-          additionalProperties: false,
+    const response = await this.openai.chatStructured<{
+      shouldSaySame: boolean;
+      response?: string;
+    }>({
+      messages: [
+        {
+          role: "system",
+          content: systemMessage,
         },
-        schemaName: "shouldSaySame",
-        schemaDescription: "Decision on whether to say 'same'",
+        {
+          role: "user",
+          content: `Conversation context:\n${contextText}\n\nMost recent message:\n${latestMessageContent}\n\nWould saying "same" or similar be contextually appropriate here? If yes, what should the response be?`,
+        },
+      ],
+      schema: {
+        type: "object",
+        properties: {
+          shouldSaySame: {
+            type: "boolean",
+            description:
+              "Whether saying 'same' or similar would be contextually appropriate",
+          },
+          response: {
+            type: "string",
+            description:
+              "The brief response to use if shouldSaySame is true (1-3 words max, lowercase)",
+          },
+        },
+        required: ["shouldSaySame"],
+        additionalProperties: false,
       },
-    );
+      schemaName: "shouldSaySame",
+      schemaDescription: "Decision on whether to say 'same' and what response to use",
+    });
 
     return response.match(
-      (result) => result.shouldSaySame,
+      (result) => {
+        if (result.shouldSaySame && result.response) {
+          return {
+            shouldSaySame: true,
+            response: result.response.trim().toLowerCase(),
+          };
+        }
+        return { shouldSaySame: false };
+      },
       (error) => {
         this.logger.warn({ err: error }, "Failed to check if should say same");
-        return false;
+        return { shouldSaySame: false };
       },
     );
   }
