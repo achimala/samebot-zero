@@ -314,6 +314,81 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
     );
   }
 
+  async shouldSaySame(
+    context: AgentContext,
+    latestMessageContent: string,
+  ): Promise<{ shouldSaySame: boolean; response?: string }> {
+    const contextText = this.formatContextText(context);
+
+    const systemMessage = `${PERSONA}
+You are deciding whether saying "same" or a similar brief agreement would be contextually appropriate and natural.
+
+Say "same" (or similar) when:
+- Someone expresses a relatable feeling, experience, or opinion
+- Someone shares something you can relate to
+- The conversation is casual and friendly
+- It would be a natural, brief response
+
+Do NOT say "same" when:
+- Someone is asking a question that needs an answer
+- The message requires a substantive response
+- It would be awkward or inappropriate
+- You've already said "same" recently in the conversation
+
+If appropriate, provide a brief response (1-3 words max). Examples: "same", "same here", "yeah same", "literally same", "mood", "big mood", "felt", "relatable", etc. Keep it brief and natural. Use lowercase.`;
+
+    const response = await this.openai.chatStructured<{
+      shouldSaySame: boolean;
+      response?: string;
+    }>({
+      messages: [
+        {
+          role: "system",
+          content: systemMessage,
+        },
+        {
+          role: "user",
+          content: `Conversation context:\n${contextText}\n\nMost recent message:\n${latestMessageContent}\n\nWould saying "same" or similar be contextually appropriate here? If yes, what should the response be?`,
+        },
+      ],
+      schema: {
+        type: "object",
+        properties: {
+          shouldSaySame: {
+            type: "boolean",
+            description:
+              "Whether saying 'same' or similar would be contextually appropriate",
+          },
+          response: {
+            type: "string",
+            description:
+              "The brief response to use if shouldSaySame is true (1-3 words max, lowercase)",
+          },
+        },
+        required: ["shouldSaySame"],
+        additionalProperties: false,
+      },
+      schemaName: "shouldSaySame",
+      schemaDescription: "Decision on whether to say 'same' and what response to use",
+    });
+
+    return response.match(
+      (result) => {
+        if (result.shouldSaySame && result.response) {
+          return {
+            shouldSaySame: true,
+            response: result.response.trim().toLowerCase(),
+          };
+        }
+        return { shouldSaySame: false };
+      },
+      (error) => {
+        this.logger.warn({ err: error }, "Failed to check if should say same");
+        return { shouldSaySame: false };
+      },
+    );
+  }
+
   chatWithContext(
     context: AgentContext,
     options: {
