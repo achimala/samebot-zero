@@ -1,6 +1,7 @@
 import type { Message } from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import type { ScrapbookMemory } from "../scrapbook/store";
+import { EntityResolver } from "../utils/entity-resolver";
 
 const INACTIVITY_TIMEOUT_MS = 90 * 60 * 1000;
 const SCRAPBOOK_EXTRACTION_INTERVAL = 6;
@@ -13,11 +14,13 @@ interface ChannelState {
 
 export class ScrapbookFeature implements Feature {
   private ctx!: RuntimeContext;
+  private entityResolver!: EntityResolver;
   private channelStates = new Map<string, ChannelState>();
   private inactivityTimer: NodeJS.Timeout | null = null;
 
   register(context: RuntimeContext): void {
     this.ctx = context;
+    this.entityResolver = new EntityResolver(context.supabase, context.logger);
 
     context.discord.on("messageCreate", (message) => {
       void this.handleMessage(message);
@@ -144,12 +147,16 @@ export class ScrapbookFeature implements Feature {
 
     const formattedMemory = this.formatScrapbookMemory(memory);
 
-    const imagePrompt = await this.generateImagePromptForMemory(memory);
-    if (imagePrompt) {
-      const imageResult = await this.ctx.openai.generateImage({
-        prompt: imagePrompt,
+    const imagePromptResult = await this.generateImagePromptForMemory(memory);
+    if (imagePromptResult) {
+      const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+        prompt: imagePromptResult.textPrompt,
         aspectRatio: "16:9",
-      });
+      };
+      if (imagePromptResult.referenceImages) {
+        imageOptions.referenceImages = imagePromptResult.referenceImages;
+      }
+      const imageResult = await this.ctx.openai.generateImage(imageOptions);
 
       await imageResult.match(
         async ({ buffer }) => {
@@ -158,7 +165,7 @@ export class ScrapbookFeature implements Feature {
             channelId,
             buffer,
             "scrapbook-memory.png",
-            imagePrompt,
+            imagePromptResult.textPrompt,
           );
         },
         async (error) => {
@@ -180,10 +187,27 @@ export class ScrapbookFeature implements Feature {
 
   private async generateImagePromptForMemory(
     memory: ScrapbookMemory,
-  ): Promise<string | null> {
+  ): Promise<{ textPrompt: string; referenceImages?: Array<{ data: string; mimeType: string }> } | null> {
     const contextText = memory.context
       .map((m) => `<${m.author}> ${m.content}`)
       .join("\n");
+
+    const authors = new Set<string>();
+    authors.add(memory.author);
+    for (const m of memory.context) {
+      authors.add(m.author);
+    }
+    const authorText = Array.from(authors).join(" ");
+
+    const entityResolution = await this.entityResolver.resolve(authorText);
+    let basePrompt = `Create an image prompt for this memory. Use the full conversation context to capture the scene:\n\nConversation context:\n${contextText}\n\nKey quote: "${memory.keyMessage}" - ${memory.author}`;
+    let referenceImages: Array<{ data: string; mimeType: string }> | undefined;
+
+    if (entityResolution) {
+      const built = this.entityResolver.buildPromptWithReferences(entityResolution);
+      basePrompt = `${built.textPrompt}\n\n${basePrompt}`;
+      referenceImages = built.referenceImages;
+    }
 
     const result = await this.ctx.openai.chatStructured<{ prompt: string }>({
       messages: [
@@ -197,7 +221,7 @@ Keep the prompt concise (under 100 words).`,
         },
         {
           role: "user",
-          content: `Create an image prompt for this memory. Use the full conversation context to capture the scene:\n\nConversation context:\n${contextText}\n\nKey quote: "${memory.keyMessage}" - ${memory.author}`,
+          content: basePrompt,
         },
       ],
       schema: {
@@ -216,7 +240,10 @@ Keep the prompt concise (under 100 words).`,
     });
 
     if (result.isOk()) {
-      return result.value.prompt;
+      return {
+        textPrompt: result.value.prompt,
+        referenceImages,
+      };
     }
 
     this.ctx.logger.warn(
