@@ -314,6 +314,67 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
     );
   }
 
+  async shouldSaySame(
+    context: AgentContext,
+    latestMessageContent: string,
+  ): Promise<boolean> {
+    const contextText = this.formatContextText(context);
+
+    const systemMessage = `${PERSONA}
+You are deciding whether saying "same" (or a similar brief agreement) would be contextually appropriate and natural.
+
+Say "same" when:
+- Someone expresses a relatable feeling, experience, or opinion
+- Someone shares something you can relate to
+- The conversation is casual and friendly
+- It would be a natural, brief response
+
+Do NOT say "same" when:
+- Someone is asking a question that needs an answer
+- The message requires a substantive response
+- It would be awkward or inappropriate
+- You've already said "same" recently in the conversation
+
+Be conservative - only return true if saying "same" would feel natural and appropriate.`;
+
+    const response = await this.openai.chatStructured<{ shouldSaySame: boolean }>(
+      {
+        messages: [
+          {
+            role: "system",
+            content: systemMessage,
+          },
+          {
+            role: "user",
+            content: `Conversation context:\n${contextText}\n\nMost recent message:\n${latestMessageContent}\n\nWould saying "same" be contextually appropriate here?`,
+          },
+        ],
+        schema: {
+          type: "object",
+          properties: {
+            shouldSaySame: {
+              type: "boolean",
+              description:
+                "Whether saying 'same' would be contextually appropriate",
+            },
+          },
+          required: ["shouldSaySame"],
+          additionalProperties: false,
+        },
+        schemaName: "shouldSaySame",
+        schemaDescription: "Decision on whether to say 'same'",
+      },
+    );
+
+    return response.match(
+      (result) => result.shouldSaySame,
+      (error) => {
+        this.logger.warn({ err: error }, "Failed to check if should say same");
+        return false;
+      },
+    );
+  }
+
   chatWithContext(
     context: AgentContext,
     options: {

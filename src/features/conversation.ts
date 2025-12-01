@@ -12,6 +12,7 @@ import { DiscordAdapter } from "../adapters/discord";
 import { EntityResolver } from "../utils/entity-resolver";
 
 const AUTO_REACT_PROBABILITY = 0.15;
+const SAY_SAME_PROBABILITY = 0.2;
 const MEMORY_EXTRACTION_INTERVAL = 6;
 
 interface ConversationState {
@@ -221,10 +222,26 @@ export class ConversationFeature implements Feature {
 
     await this.adapter.sendTyping(message.channelId);
 
-    const response = await this.agent.generateResponse(
-      agentContext,
-      message.id,
-    );
+    let response: { text: string | null; toolCallsMade: unknown[] };
+    if (Math.random() < SAY_SAME_PROBABILITY) {
+      const shouldSaySame = await this.agent.shouldSaySame(
+        agentContext,
+        incomingMessage.content || "(silent)",
+      );
+      if (shouldSaySame) {
+        response = { text: "same", toolCallsMade: [] };
+      } else {
+        response = await this.agent.generateResponse(
+          agentContext,
+          message.id,
+        );
+      }
+    } else {
+      response = await this.agent.generateResponse(
+        agentContext,
+        message.id,
+      );
+    }
 
     if (response.text && response.text.length > 0) {
       const sendResult = await this.adapter.sendMessage(
