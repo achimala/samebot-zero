@@ -7,7 +7,6 @@ import { OpenAIClient } from "./openai/client";
 import { SupabaseClient } from "./supabase/client";
 import type { Feature } from "./core/runtime";
 import { ConversationFeature } from "./features/conversation";
-import { ReactionEchoFeature } from "./features/reaction-echo";
 import { ImageCommandFeature } from "./features/image-command";
 import { ImageOfDayFeature } from "./features/image-of-day";
 import { AgentLaunchFeature } from "./features/agent-launch";
@@ -56,7 +55,6 @@ async function main() {
 
   const features: Feature[] = [
     conversationFeature,
-    new ReactionEchoFeature(),
     new ImageCommandFeature(),
     new ImageOfDayFeature(),
     new AgentLaunchFeature(),
