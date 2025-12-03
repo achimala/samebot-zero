@@ -16,6 +16,7 @@ const promptResponseJsonSchema = {
     prompt: { type: "string" },
     caption: { type: "string" },
   },
+  additionalProperties: false,
 };
 
 export class ImageOfDayFeature implements Feature {
