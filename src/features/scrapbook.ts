@@ -182,7 +182,7 @@ export class ScrapbookFeature implements Feature {
   }
 
   private formatScrapbookMemory(memory: ScrapbookMemory): string {
-    return `> "${memory.keyMessage}"\n— ${memory.author}`;
+    return `> ${memory.keyMessage}\n— ${memory.author}`;
   }
 
   private async generateImagePromptForMemory(

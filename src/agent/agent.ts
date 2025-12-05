@@ -838,14 +838,14 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
     keyMessage: string;
     author: string;
   }): string {
-    return `> "${memory.keyMessage}"\n— ${memory.author}`;
+    return `> ${memory.keyMessage}\n— ${memory.author}`;
   }
 
   private formatScrapbookSearchResults(
     results: Array<{ id: string; keyMessage: string; author: string }>,
   ): string {
     return results
-      .map((memory) => `> "${memory.keyMessage}"\n— ${memory.author}`)
+      .map((memory) => `> ${memory.keyMessage}\n— ${memory.author}`)
       .join("\n\n");
   }
 
