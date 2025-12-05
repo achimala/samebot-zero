@@ -1,4 +1,5 @@
 import type { Client, GuildEmoji, Message, GuildChannel } from "discord.js";
+import { EmbedBuilder } from "discord.js";
 import { ResultAsync } from "neverthrow";
 import type { Logger } from "pino";
 import type { ToolResult, IncomingMessage } from "../agent/types";
@@ -142,6 +143,51 @@ export class DiscordAdapter {
       }),
       (error) => ({ success: false as const, error: error.message }),
     );
+  }
+
+  async sendEmbeds(
+    channelId: string,
+    embeds: EmbedBuilder[],
+  ): Promise<ToolResult> {
+    const result = await this.messenger.sendEmbeds(channelId, embeds);
+
+    return result.match(
+      () => ({
+        success: true as const,
+        message: "Embeds sent successfully",
+      }),
+      (error) => ({ success: false as const, error: error.message }),
+    );
+  }
+
+  async findUserByName(
+    channelId: string,
+    userName: string,
+  ): Promise<{ avatarUrl: string; defaultAvatarURL: string } | null> {
+    try {
+      const channel = await this.fetchChannel(channelId);
+      if (!channel || !("guild" in channel) || !channel.guild) {
+        return null;
+      }
+
+      const normalizedName = userName.toLowerCase();
+      const member = channel.guild.members.cache.find(
+        (member) =>
+          member.displayName.toLowerCase() === normalizedName ||
+          member.user.username.toLowerCase() === normalizedName,
+      );
+
+      if (member?.user) {
+        return {
+          avatarUrl: member.user.displayAvatarURL() || member.user.defaultAvatarURL,
+          defaultAvatarURL: member.user.defaultAvatarURL,
+        };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   resolveEmoji(emojiInput: string): string | null {

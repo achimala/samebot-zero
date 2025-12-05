@@ -1,6 +1,7 @@
 import { DateTime } from "luxon";
 import type { Logger } from "pino";
-import type { GuildEmoji } from "discord.js";
+import type { GuildEmoji, Client } from "discord.js";
+import { EmbedBuilder } from "discord.js";
 import type {
   ToolDefinition,
   ToolCall,
@@ -729,10 +730,23 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         const query = toolCall.arguments.query as string;
         const searchResults = await this.memory.searchMemories(query, 10);
         if (searchResults.length > 0) {
-          const memoryResultsText = searchResults
-            .map((m) => `- ${m.content}`)
-            .join("\n");
-          return `Found memories:\n${memoryResultsText}`;
+          const embeds = await this.formatMemoriesAsEmbeds(
+            searchResults,
+            channelId,
+          );
+          const sendResult = await this.adapter.sendEmbeds(channelId, embeds);
+          if (sendResult.success) {
+            return `Found ${searchResults.length} memories`;
+          } else {
+            this.logger.error(
+              { err: sendResult.error },
+              "Failed to send memory embeds",
+            );
+            const memoryResultsText = searchResults
+              .map((m) => `- ${m.content}`)
+              .join("\n");
+            return `Found memories:\n${memoryResultsText}`;
+          }
         }
         return "No relevant memories found for that query.";
       }
@@ -857,5 +871,48 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       .map((m) => `<${m.author}> ${m.content}`)
       .join("\n");
     return `**context for "${memory.keyMessage}":**\n\`\`\`\n${contextLines}\n\`\`\``;
+  }
+
+  private async formatMemoriesAsEmbeds(
+    memories: Array<{ id: string; content: string }>,
+    channelId: string,
+  ): Promise<EmbedBuilder[]> {
+    const embeds: EmbedBuilder[] = [];
+
+    for (const memory of memories) {
+      const embed = new EmbedBuilder().setDescription(memory.content);
+
+      const userName = this.extractUserNameFromMemory(memory.content);
+      if (userName) {
+        const user = await this.adapter.findUserByName(channelId, userName);
+        if (user) {
+          embed.setAuthor({
+            name: userName,
+            iconURL: user.avatarUrl,
+          });
+        }
+      }
+
+      embeds.push(embed);
+    }
+
+    return embeds;
+  }
+
+  private extractUserNameFromMemory(content: string): string | null {
+    const patterns = [
+      /^([A-Za-z][A-Za-z0-9_]+)\s+(?:is|likes|loves|hates|works|plays|has|does|wants|needs|prefers|enjoys|dislikes)/i,
+      /^([A-Za-z][A-Za-z0-9_]+)'s\s+/i,
+      /about\s+([A-Za-z][A-Za-z0-9_]+)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = content.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
+    return null;
   }
 }

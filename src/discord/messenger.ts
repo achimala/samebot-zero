@@ -3,6 +3,7 @@ import type {
   Message,
   TextBasedChannel,
   PartialGroupDMChannel,
+  EmbedBuilder,
 } from "discord.js";
 import { ChannelType } from "discord.js";
 import { ResultAsync, err } from "neverthrow";
@@ -166,6 +167,28 @@ export class DiscordMessenger {
       return ResultAsync.fromPromise(sendPromise, (error) => {
         this.logger.error({ err: error }, "Failed to send attachment");
         return Errors.discord("Unable to send attachment");
+      }).map<void>(() => undefined);
+    });
+  }
+
+  sendEmbeds(channelId: string, embeds: EmbedBuilder[]) {
+    return ResultAsync.fromPromise(
+      this.fetchTextChannel(channelId),
+      (error) => {
+        this.logger.error({ err: error }, "Failed to fetch channel");
+        return Errors.discord("Unable to fetch channel");
+      },
+    ).andThen((channel) => {
+      const sendableChannel = this.assertSendableChannel(channel);
+      if (sendableChannel === null) {
+        return err(Errors.discord("Channel does not support sending messages"));
+      }
+      const sendPromise: Promise<Message> = sendableChannel.send({
+        embeds: embeds,
+      });
+      return ResultAsync.fromPromise(sendPromise, (error) => {
+        this.logger.error({ err: error }, "Failed to send embeds");
+        return Errors.discord("Unable to send embeds");
       }).map<void>(() => undefined);
     });
   }
