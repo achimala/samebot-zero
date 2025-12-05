@@ -16,6 +16,7 @@ const promptResponseJsonSchema = {
     prompt: { type: "string" },
     caption: { type: "string" },
   },
+  required: ["prompt"],
   additionalProperties: false,
 };
 
