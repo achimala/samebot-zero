@@ -27,13 +27,12 @@ export class ImageOfDayFeature implements Feature {
   register(context: RuntimeContext): void {
     this.ctx = context;
     this.entityResolver = new EntityResolver(context.supabase, context.logger);
-    const scheduleIfReady = () => {
-      if (context.discord.isReady()) {
-        this.scheduleNext();
-      }
-    };
-    scheduleIfReady();
-    context.discord.on("ready", scheduleIfReady);
+    if (context.discord.isReady()) {
+      this.scheduleNext();
+    }
+    context.discord.on("ready", () => {
+      this.scheduleNext();
+    });
   }
 
   private scheduleNext() {
