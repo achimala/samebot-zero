@@ -365,7 +365,7 @@ If appropriate, provide a brief response (1-3 words max). Examples: "same", "sam
               "The brief response to use if shouldSaySame is true (1-3 words max, lowercase)",
           },
         },
-        required: ["shouldSaySame"],
+        required: ["shouldSaySame", "response"],
         additionalProperties: false,
       },
       schemaName: "shouldSaySame",
