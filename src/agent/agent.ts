@@ -900,19 +900,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
   }
 
   private extractUserNameFromMemory(content: string): string | null {
-    const patterns = [
-      /^([A-Za-z][A-Za-z0-9_]+)\s+(?:is|likes|loves|hates|works|plays|has|does|wants|needs|prefers|enjoys|dislikes)/i,
-      /^([A-Za-z][A-Za-z0-9_]+)'s\s+/i,
-      /about\s+([A-Za-z][A-Za-z0-9_]+)/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = content.match(pattern);
-      if (match && match[1]) {
-        return match[1];
-      }
-    }
-
-    return null;
+    const match = content.match(/^([A-Z][a-zA-Z0-9_]+)/);
+    return match ? match[1] : null;
   }
 }
