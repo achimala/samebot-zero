@@ -166,7 +166,7 @@ export class DiscordMessenger {
       return ResultAsync.fromPromise(sendPromise, (error) => {
         this.logger.error({ err: error }, "Failed to send attachment");
         return Errors.discord("Unable to send attachment");
-      }).map<void>(() => undefined);
+      }).map((message) => ({ messageId: message.id }));
     });
   }
 
