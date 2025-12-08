@@ -741,14 +741,37 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         const memory = await this.scrapbook.getRandomMemory();
         if (memory) {
           const formatted = this.formatScrapbookMemory(memory);
-          const sendResult = await this.adapter.sendMessage(
-            channelId,
-            formatted,
-          );
-          if (!sendResult.messageId) {
-            this.logger.error({}, "Failed to post scrapbook memory");
-            return "Failed to post scrapbook memory to channel.";
+          await this.adapter.sendMessage(channelId, formatted);
+
+          const imagePromptResult = await this.generateImageForScrapbookMemory(memory);
+          if (imagePromptResult) {
+            const imageOptions: Parameters<typeof this.openai.generateImage>[0] = {
+              prompt: imagePromptResult.textPrompt,
+              aspectRatio: "16:9",
+            };
+            if (imagePromptResult.referenceImages) {
+              imageOptions.referenceImages = imagePromptResult.referenceImages;
+            }
+            const imageResult = await this.openai.generateImage(imageOptions);
+
+            await imageResult.match(
+              async ({ buffer }) => {
+                await this.adapter.sendImage(
+                  channelId,
+                  buffer,
+                  "scrapbook-memory.png",
+                  imagePromptResult.textPrompt,
+                );
+              },
+              async (error) => {
+                this.logger.warn(
+                  { err: error },
+                  "Failed to generate scrapbook image",
+                );
+              },
+            );
           }
+
           return `Posted scrapbook memory to channel [${memory.id}]: "${memory.keyMessage}" by ${memory.author}`;
         }
         return "No scrapbook memories found.";
@@ -759,14 +782,39 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         const results = await this.scrapbook.searchMemories(query, 5);
         if (results.length > 0) {
           const formatted = this.formatScrapbookSearchResults(results);
-          const sendResult = await this.adapter.sendMessage(
-            channelId,
-            formatted,
-          );
-          if (!sendResult.messageId) {
-            this.logger.error({}, "Failed to post scrapbook search results");
-            return "Failed to post scrapbook results to channel.";
+          await this.adapter.sendMessage(channelId, formatted);
+
+          for (const memory of results) {
+            const imagePromptResult = await this.generateImageForScrapbookMemory(memory);
+            if (imagePromptResult) {
+              const imageOptions: Parameters<typeof this.openai.generateImage>[0] = {
+                prompt: imagePromptResult.textPrompt,
+                aspectRatio: "16:9",
+              };
+              if (imagePromptResult.referenceImages) {
+                imageOptions.referenceImages = imagePromptResult.referenceImages;
+              }
+              const imageResult = await this.openai.generateImage(imageOptions);
+
+              await imageResult.match(
+                async ({ buffer }) => {
+                  await this.adapter.sendImage(
+                    channelId,
+                    buffer,
+                    "scrapbook-memory.png",
+                    imagePromptResult.textPrompt,
+                  );
+                },
+                async (error) => {
+                  this.logger.warn(
+                    { err: error, memoryId: memory.id },
+                    "Failed to generate scrapbook image for search result",
+                  );
+                },
+              );
+            }
           }
+
           const summaryText = results
             .map((m) => `[${m.id}]: "${m.keyMessage}" by ${m.author}`)
             .join("; ");
@@ -857,5 +905,81 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       .map((m) => `<${m.author}> ${m.content}`)
       .join("\n");
     return `**context for "${memory.keyMessage}":**\n\`\`\`\n${contextLines}\n\`\`\``;
+  }
+
+  private async generateImageForScrapbookMemory(
+    memory: {
+      keyMessage: string;
+      author: string;
+      context: Array<{ author: string; content: string }>;
+    },
+  ): Promise<{
+    textPrompt: string;
+    referenceImages?: Array<{ data: string; mimeType: string }>;
+  } | null> {
+    const contextText = memory.context
+      .map((m) => `<${m.author}> ${m.content}`)
+      .join("\n");
+
+    const authors = new Set<string>();
+    authors.add(memory.author);
+    for (const m of memory.context) {
+      authors.add(m.author);
+    }
+    const authorText = Array.from(authors).join(" ");
+
+    const entityResolution = await this.entityResolver.resolve(authorText);
+    let basePrompt = `Create an image prompt for this memory. Use the full conversation context to capture the scene:\n\nConversation context:\n${contextText}\n\nKey quote: "${memory.keyMessage}" - ${memory.author}`;
+    let referenceImages: Array<{ data: string; mimeType: string }> | undefined;
+
+    if (entityResolution) {
+      const built = this.entityResolver.buildPromptWithReferences(entityResolution);
+      basePrompt = `${built.textPrompt}\n\n${basePrompt}`;
+      referenceImages = built.referenceImages;
+    }
+
+    const result = await this.openai.chatStructured<{ prompt: string }>({
+      messages: [
+        {
+          role: "system",
+          content: `You create artistic image prompts for nostalgic chat memories.
+Given a memorable chat quote and its full conversation context, create a creative, whimsical image prompt that captures the scene and essence of the moment.
+The image should be surreal, artistic, and evocative - not a literal depiction.
+Use the entire conversation context to understand the scene, mood, and setting of the moment.
+Keep the prompt concise (under 100 words).
+Note: Any reference images provided are used as references for generation, not as images to be directly pasted into the output.`,
+        },
+        {
+          role: "user",
+          content: basePrompt,
+        },
+      ],
+      schema: {
+        type: "object",
+        properties: {
+          prompt: {
+            type: "string",
+            description: "The image generation prompt",
+          },
+        },
+        required: ["prompt"],
+        additionalProperties: false,
+      },
+      schemaName: "imagePrompt",
+      model: "gpt-5-mini",
+    });
+
+    if (result.isOk()) {
+      return {
+        textPrompt: result.value.prompt,
+        referenceImages,
+      };
+    }
+
+    this.logger.warn(
+      { err: result.error },
+      "Failed to generate image prompt for scrapbook memory",
+    );
+    return null;
   }
 }
