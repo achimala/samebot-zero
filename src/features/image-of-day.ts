@@ -64,7 +64,7 @@ export class ImageOfDayFeature implements Feature {
       const availableEntities = await this.ctx.supabase.listEntityFolders();
       const entityContext =
         availableEntities.length > 0
-          ? `\n\nYou can feature these people/entities in your meme (we have reference images for them): ${availableEntities.join(", ")}. Feel free to include them by name in your prompt if it would make the meme funnier.`
+          ? `\n\nYou can feature these people/entities in your meme (we have reference images for them): ${availableEntities.join(", ")}. Feel free to include them by name in your prompt if it would make the meme funnier. Note: These reference images are used as references for generation, not as images to be directly pasted into the output.`
           : "";
 
       let conversationContext = "";
