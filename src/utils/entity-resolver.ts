@@ -152,7 +152,7 @@ export class EntityResolver {
     for (const entity of result.entities) {
       const imageCount = entity.referenceImages.length;
       referenceImageSections.push(
-        `Reference images of ${entity.name}: [${imageCount} image${imageCount !== 1 ? "s" : ""} attached]`,
+        `Reference images of ${entity.name} (use as references for generation, not to be directly pasted): [${imageCount} image${imageCount !== 1 ? "s" : ""} attached]`,
       );
       allReferenceImages.push(...entity.referenceImages);
     }

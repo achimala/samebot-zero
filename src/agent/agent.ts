@@ -497,7 +497,7 @@ If appropriate, provide a brief response (1-3 words max). Examples: "same", "sam
     const availableEntities = await this.supabase.listEntityFolders();
     const entityContext =
       availableEntities.length > 0
-        ? `\n\nWhen generating images, you can feature these people/entities (we have reference images for them): ${availableEntities.join(", ")}. Include them by name in your image prompt to use their likeness.`
+        ? `\n\nWhen generating images, you can feature these people/entities (we have reference images for them): ${availableEntities.join(", ")}. Include them by name in your image prompt to use their likeness. Note: These reference images are used as references for generation, not as images to be directly pasted into the output.`
         : "";
 
     const relevantMemories = await this.memory.getRelevantMemories(
@@ -513,7 +513,7 @@ If appropriate, provide a brief response (1-3 words max). Examples: "same", "sam
 
 You have tools available to:
 - react: React to a message with an emoji
-- generate_image: Generate an image with a prompt (if the user shares an image, you can use it as a reference for generation/modification)
+- generate_image: Generate an image with a prompt (if the user shares an image, you can use it as a reference for generation/modification - note that reference images are used as references, not as images to be directly pasted into the output)
 - search_memory: Search your memory for information you don't currently recall
 - get_scrapbook_memory: Get a random memorable quote from the scrapbook (POSTS TO CHANNEL)
 - search_scrapbook: Search for specific memorable quotes (POSTS TO CHANNEL)

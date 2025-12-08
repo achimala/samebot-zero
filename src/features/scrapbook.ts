@@ -274,7 +274,8 @@ export class ScrapbookFeature implements Feature {
 Given a memorable chat quote and its full conversation context, create a creative, whimsical image prompt that captures the scene and essence of the moment.
 The image should be surreal, artistic, and evocative - not a literal depiction.
 Use the entire conversation context to understand the scene, mood, and setting of the moment.
-Keep the prompt concise (under 100 words).`,
+Keep the prompt concise (under 100 words).
+Note: Any reference images provided are used as references for generation, not as images to be directly pasted into the output.`,
         },
         {
           role: "user",
