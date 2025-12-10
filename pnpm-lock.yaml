@@ -29,6 +29,9 @@ importers:
       fuse.js:
         specifier: ^7.1.0
         version: 7.1.0
+      gif-encoder-2:
+        specifier: ^1.0.5
+        version: 1.0.5
       luxon:
         specifier: ^3.7.2
         version: 3.7.2
@@ -1318,6 +1321,9 @@ packages:
 
   get-tsconfig@4.13.0:
     resolution: {integrity: sha512-1VKTZJCwBrvbd+Wn3AOgQP/2Av+TfTCOlE4AcRJE72W1ksZXbAx8PPBR9RzgTeSPzlPMHrbANMH3LbltH73wxQ==}
+
+  gif-encoder-2@1.0.5:
+    resolution: {integrity: sha512-fsRAKbZuUoZ7FYGjpFElmflTkKwsn/CzAmL/xDl4558aTAgysIDCUF6AXWO8dmai/ApfZACbPVAM+vPezJXlFg==}
 
   github-from-package@0.0.0:
     resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
@@ -3142,6 +3148,8 @@ snapshots:
   get-tsconfig@4.13.0:
     dependencies:
       resolve-pkg-maps: 1.0.0
+
+  gif-encoder-2@1.0.5: {}
 
   github-from-package@0.0.0: {}
 

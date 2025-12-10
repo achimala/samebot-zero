@@ -9,7 +9,7 @@ import {
   type Message,
 } from "discord.js";
 import type { RuntimeContext } from "../core/runtime";
-import { processEmojiImage } from "./image-processing";
+import { processEmojiImage, processGifEmojiGrid } from "./image-processing";
 import { EntityResolver } from "./entity-resolver";
 
 const MAX_EMOJI_SLOTS = 50;
@@ -28,6 +28,7 @@ export interface EmojiPreview {
   buffer: Buffer;
   prompt: string;
   referenceImages: ReferenceImage[] | undefined;
+  isGif?: boolean;
 }
 
 export interface ReferenceImage {
@@ -118,6 +119,88 @@ export class EmojiGenerator {
     }
   }
 
+  async generateGifPreview(
+    prompt: string,
+    referenceImages?: ReferenceImage[],
+    customName?: string,
+  ): Promise<EmojiPreview | null> {
+    let effectivePrompt = prompt;
+    let effectiveReferenceImages = referenceImages;
+
+    if (!referenceImages || referenceImages.length === 0) {
+      const resolution = await this.entityResolver.resolve(prompt);
+      if (resolution) {
+        const built = this.entityResolver.buildPromptWithReferences(resolution);
+        effectivePrompt = built.textPrompt;
+        effectiveReferenceImages = built.referenceImages;
+      }
+    }
+
+    const namePromise: Promise<string | null> = customName
+      ? Promise.resolve(this.sanitizeEmojiName(customName))
+      : (async () => {
+          const result = await this.generateEmojiName(prompt);
+          if (result.isErr()) {
+            this.ctx.logger.error(
+              { err: result.error },
+              "Failed to generate emoji name",
+            );
+            return null;
+          }
+          return result.value;
+        })();
+
+    const gifPrompt = this.buildGifPrompt(effectivePrompt);
+    const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+      prompt: gifPrompt,
+      aspectRatio: "1:1",
+      imageSize: "1K",
+    };
+    if (effectiveReferenceImages && effectiveReferenceImages.length > 0) {
+      imageOptions.referenceImages = effectiveReferenceImages;
+    }
+    const imagePromise = this.ctx.openai.generateImage(imageOptions);
+
+    const [emojiName, imageResult] = await Promise.all([
+      namePromise,
+      imagePromise,
+    ]);
+
+    if (!emojiName) {
+      return null;
+    }
+
+    if (imageResult.isErr()) {
+      this.ctx.logger.error(
+        { err: imageResult.error },
+        "GIF image generation failed",
+      );
+      return null;
+    }
+
+    const { buffer } = imageResult.value;
+
+    try {
+      const gifBuffer = await processGifEmojiGrid(buffer);
+      return {
+        name: emojiName,
+        buffer: gifBuffer,
+        prompt,
+        referenceImages: effectiveReferenceImages,
+        isGif: true,
+      };
+    } catch (error) {
+      this.ctx.logger.error({ err: error }, "Failed to process GIF emoji");
+      return null;
+    }
+  }
+
+  private buildGifPrompt(prompt: string): string {
+    const basePrompt = `${prompt}, solid bright magenta background (#FF00FF), suitable as a Discord emoji. Will be displayed very small, so make things clear and avoid fine details or small text`;
+
+    return `${basePrompt}. Create a 3x3 grid of animation frames showing the progression of this emoji. Each frame should be as stable as possible with minimal changes between frames, arranged in a 3x3 grid layout (3 rows, 3 columns). The frames should show a smooth animation sequence from top-left to bottom-right.`;
+  }
+
   async postPreviewWithButtons(preview: EmojiPreview): Promise<string | null> {
     const emojiGuild = this.ctx.discord.guilds.cache.get(
       this.ctx.config.emojiGuildId,
@@ -143,18 +226,21 @@ export class EmojiGenerator {
 
     this.pendingPreviews.set(previewId, preview);
 
+    const buttonPrefix = preview.isGif ? "gifemoji" : "emoji";
+    const fileExtension = preview.isGif ? "gif" : "png";
+
     const saveButton = new ButtonBuilder()
-      .setCustomId(`emoji-save-${previewId}`)
+      .setCustomId(`${buttonPrefix}-save-${previewId}`)
       .setLabel("Save")
       .setStyle(ButtonStyle.Success);
 
     const rerollButton = new ButtonBuilder()
-      .setCustomId(`emoji-reroll-${previewId}`)
+      .setCustomId(`${buttonPrefix}-reroll-${previewId}`)
       .setLabel("Reroll")
       .setStyle(ButtonStyle.Secondary);
 
     const cancelButton = new ButtonBuilder()
-      .setCustomId(`emoji-cancel-${previewId}`)
+      .setCustomId(`${buttonPrefix}-cancel-${previewId}`)
       .setLabel("Cancel")
       .setStyle(ButtonStyle.Danger);
 
@@ -171,7 +257,7 @@ export class EmojiGenerator {
         files: [
           {
             attachment: preview.buffer,
-            name: `${preview.name}.png`,
+            name: `${preview.name}.${fileExtension}`,
           },
         ],
         components: [row],
@@ -202,9 +288,11 @@ export class EmojiGenerator {
     messageId: string,
     currentName: string,
     currentPrompt: string,
+    isGif: boolean = false,
   ) {
+    const prefix = isGif ? "gifemoji" : "emoji";
     return {
-      custom_id: `emoji-reroll-modal-${previewId}-${messageId}`,
+      custom_id: `${prefix}-reroll-modal-${previewId}-${messageId}`,
       title: "Reroll Emoji",
       components: [
         {
@@ -299,23 +387,26 @@ export class EmojiGenerator {
     preview: EmojiPreview,
     newPreviewId: string,
   ): Promise<void> {
+    const buttonPrefix = preview.isGif ? "gifemoji" : "emoji";
+    const fileExtension = preview.isGif ? "gif" : "png";
+
     const saveButton = new ButtonBuilder()
-      .setCustomId(`emoji-save-${newPreviewId}`)
+      .setCustomId(`${buttonPrefix}-save-${newPreviewId}`)
       .setLabel("Save")
       .setStyle(ButtonStyle.Success);
 
     const editButton = new ButtonBuilder()
-      .setCustomId(`emoji-edit-${newPreviewId}`)
+      .setCustomId(`${buttonPrefix}-edit-${newPreviewId}`)
       .setLabel("Edit")
       .setStyle(ButtonStyle.Primary);
 
     const rerollButton = new ButtonBuilder()
-      .setCustomId(`emoji-reroll-${newPreviewId}`)
+      .setCustomId(`${buttonPrefix}-reroll-${newPreviewId}`)
       .setLabel("Reroll")
       .setStyle(ButtonStyle.Secondary);
 
     const cancelButton = new ButtonBuilder()
-      .setCustomId(`emoji-cancel-${newPreviewId}`)
+      .setCustomId(`${buttonPrefix}-cancel-${newPreviewId}`)
       .setLabel("Cancel")
       .setStyle(ButtonStyle.Danger);
 
@@ -331,7 +422,7 @@ export class EmojiGenerator {
       files: [
         {
           attachment: preview.buffer,
-          name: `${preview.name}.png`,
+          name: `${preview.name}.${fileExtension}`,
         },
       ],
       components: [row],

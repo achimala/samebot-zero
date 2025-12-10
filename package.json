@@ -23,6 +23,7 @@
     "dotenv": "^17.2.3",
     "emittery": "^1.2.0",
     "fuse.js": "^7.1.0",
+    "gif-encoder-2": "^1.0.5",
     "luxon": "^3.7.2",
     "neverthrow": "^8.2.0",
     "openai": "^6.9.1",

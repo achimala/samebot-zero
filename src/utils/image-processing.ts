@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import GIFEncoder from "gif-encoder-2";
 
 export async function processEmojiImage(inputBuffer: Buffer): Promise<Buffer> {
   const image = sharp(inputBuffer);
@@ -141,31 +142,25 @@ async function createGifFromFrames(frames: Buffer[]): Promise<Buffer> {
   const frameDelay = 100;
   const targetSize = 128;
 
-  const processedFrames = await Promise.all(
-    frames.map(async (frame) => {
-      return await sharp(frame)
-        .resize(targetSize, targetSize, {
-          fit: "contain",
-          background: { r: 0, g: 0, b: 0, alpha: 0 },
-        })
-        .raw()
-        .toBuffer();
-    }),
-  );
+  const encoder = new GIFEncoder(targetSize, targetSize);
+  encoder.start();
+  encoder.setRepeat(0);
+  encoder.setDelay(frameDelay);
+  encoder.setQuality(10);
+  encoder.setTransparent(0x00000000);
 
-  const totalHeight = targetSize * frames.length;
-  const combinedBuffer = Buffer.concat(processedFrames);
+  for (const frame of frames) {
+    const resizedBuffer = await sharp(frame)
+      .resize(targetSize, targetSize, {
+        fit: "contain",
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .raw()
+      .toBuffer();
 
-  return await sharp(combinedBuffer, {
-    raw: {
-      width: targetSize,
-      height: totalHeight,
-      channels: 4,
-    },
-  })
-    .gif({
-      delay: frameDelay,
-      loop: 0,
-    })
-    .toBuffer();
+    encoder.addFrame(resizedBuffer);
+  }
+
+  encoder.finish();
+  return encoder.out.getData();
 }
