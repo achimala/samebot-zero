@@ -4,7 +4,12 @@ import type {
   ModalSubmitInteraction,
 } from "discord.js";
 import { type Feature, type RuntimeContext } from "../core/runtime";
-import { EmojiGenerator, type ReferenceImage } from "../utils/emoji-generator";
+import {
+  EmojiGenerator,
+  type ReferenceImage,
+  type GifOptions,
+  DEFAULT_GIF_OPTIONS,
+} from "../utils/emoji-generator";
 
 export class GifEmojiFeature implements Feature {
   private ctx!: RuntimeContext;
@@ -52,6 +57,11 @@ export class GifEmojiFeature implements Feature {
 
     const prompt = interaction.options.getString("prompt", true);
     const referenceAttachment = interaction.options.getAttachment("reference");
+    const frames = interaction.options.getInteger("frames") ?? DEFAULT_GIF_OPTIONS.frames;
+    const fps = interaction.options.getInteger("fps") ?? DEFAULT_GIF_OPTIONS.fps;
+    const loopDelay = interaction.options.getInteger("loop_delay") ?? DEFAULT_GIF_OPTIONS.loopDelay;
+
+    const gifOptions: GifOptions = { frames, fps, loopDelay };
 
     let referenceImages: ReferenceImage[] | undefined;
     if (
@@ -69,6 +79,8 @@ export class GifEmojiFeature implements Feature {
     const preview = await this.emojiGenerator.generateGifPreview(
       prompt,
       referenceImages,
+      undefined,
+      gifOptions,
     );
 
     if (!preview) {
@@ -141,6 +153,7 @@ export class GifEmojiFeature implements Feature {
       preview.name,
       preview.prompt,
       true,
+      preview.gifOptions ?? DEFAULT_GIF_OPTIONS,
     );
 
     await interaction.showModal(modal);
@@ -185,6 +198,9 @@ export class GifEmojiFeature implements Feature {
     const selectedMode = modeValues[0] ?? "fresh";
     const nameInput = interaction.fields.getTextInputValue("emoji-name");
     const promptInput = interaction.fields.getTextInputValue("emoji-prompt");
+    const gifSettingsInput = interaction.fields.getTextInputValue("gif-settings");
+
+    const gifOptions = this.parseGifSettings(gifSettingsInput, preview.gifOptions);
 
     const message = await interaction.channel.messages.fetch(messageId);
     if (!message) {
@@ -218,6 +234,7 @@ export class GifEmojiFeature implements Feature {
       promptInput,
       referenceImages.length > 0 ? referenceImages : undefined,
       nameInput,
+      gifOptions,
     );
 
     if (!newPreview) {
@@ -238,6 +255,26 @@ export class GifEmojiFeature implements Feature {
     );
 
     await interaction.deleteReply();
+  }
+
+  private parseGifSettings(
+    input: string,
+    fallback?: GifOptions,
+  ): GifOptions {
+    const defaults = fallback ?? DEFAULT_GIF_OPTIONS;
+    const parts = input.split(",").map((part) => part.trim());
+
+    const frames = parseInt(parts[0] ?? "", 10);
+    const fps = parseInt(parts[1] ?? "", 10);
+    const loopDelay = parseInt(parts[2] ?? "", 10);
+
+    const validFrames = [4, 9, 16, 25];
+
+    return {
+      frames: validFrames.includes(frames) ? frames : defaults.frames,
+      fps: fps >= 1 && fps <= 20 ? fps : defaults.fps,
+      loopDelay: loopDelay >= 0 && loopDelay <= 30 ? loopDelay : defaults.loopDelay,
+    };
   }
 
   private async handleCancelButton(interaction: ButtonInteraction) {

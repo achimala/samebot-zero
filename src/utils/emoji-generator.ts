@@ -9,7 +9,11 @@ import {
   type Message,
 } from "discord.js";
 import type { RuntimeContext } from "../core/runtime";
-import { processEmojiImage, processGifEmojiGrid } from "./image-processing";
+import {
+  processEmojiImage,
+  processGifEmojiGrid,
+  type GifOptions,
+} from "./image-processing";
 import { EntityResolver } from "./entity-resolver";
 
 const MAX_EMOJI_SLOTS = 50;
@@ -23,12 +27,21 @@ export interface GeneratedEmoji {
   name: string;
 }
 
+export type { GifOptions };
+
+export const DEFAULT_GIF_OPTIONS: GifOptions = {
+  frames: 9,
+  fps: 5,
+  loopDelay: 0,
+};
+
 export interface EmojiPreview {
   name: string;
   buffer: Buffer;
   prompt: string;
   referenceImages: ReferenceImage[] | undefined;
   isGif?: boolean;
+  gifOptions?: GifOptions;
 }
 
 export interface ReferenceImage {
@@ -123,6 +136,7 @@ export class EmojiGenerator {
     prompt: string,
     referenceImages?: ReferenceImage[],
     customName?: string,
+    gifOptions: GifOptions = DEFAULT_GIF_OPTIONS,
   ): Promise<EmojiPreview | null> {
     let effectivePrompt = prompt;
     let effectiveReferenceImages = referenceImages;
@@ -150,7 +164,8 @@ export class EmojiGenerator {
           return result.value;
         })();
 
-    const gifPrompt = this.buildGifPrompt(effectivePrompt);
+    const gridSize = Math.sqrt(gifOptions.frames);
+    const gifPrompt = this.buildGifPrompt(effectivePrompt, gridSize);
     const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
       prompt: gifPrompt,
       aspectRatio: "1:1",
@@ -181,13 +196,14 @@ export class EmojiGenerator {
     const { buffer } = imageResult.value;
 
     try {
-      const gifBuffer = await processGifEmojiGrid(buffer);
+      const gifBuffer = await processGifEmojiGrid(buffer, gifOptions);
       return {
         name: emojiName,
         buffer: gifBuffer,
         prompt,
         referenceImages: effectiveReferenceImages,
         isGif: true,
+        gifOptions,
       };
     } catch (error) {
       this.ctx.logger.error({ err: error }, "Failed to process GIF emoji");
@@ -195,16 +211,16 @@ export class EmojiGenerator {
     }
   }
 
-  private buildGifPrompt(prompt: string): string {
+  private buildGifPrompt(prompt: string, gridSize: number): string {
     return [
       prompt,
       "solid bright magenta background (#FF00FF) wherever it should be transparent",
       "suitable as a Discord emoji",
       "will be displayed very small so make things clear and avoid fine details or small text",
       "",
-      "Create a 3x3 grid of animation frames showing the progression of this emoji.",
+      `Create a ${gridSize}x${gridSize} grid of animation frames showing the progression of this emoji.`,
       "Each frame should be as stable as possible with minimal changes between frames.",
-      "Arranged in a 3x3 grid layout (3 rows, 3 columns).",
+      `Arranged in a ${gridSize}x${gridSize} grid layout (${gridSize} rows, ${gridSize} columns).`,
       "The frames should show a smooth animation sequence from top-left to bottom-right.",
       "",
       "IMPORTANT: Do NOT draw any borders, lines, gaps, or separators between frames.",
@@ -300,64 +316,84 @@ export class EmojiGenerator {
     currentName: string,
     currentPrompt: string,
     isGif: boolean = false,
+    gifOptions?: GifOptions,
   ) {
     const prefix = isGif ? "gifemoji" : "emoji";
+
+    const baseComponents = [
+      {
+        type: 18,
+        label: "Generation Mode",
+        component: {
+          type: 3,
+          custom_id: "emoji-mode",
+          placeholder: "Choose how to generate...",
+          options: [
+            {
+              label: "Start Fresh",
+              value: "fresh",
+              description: "Generate a completely new image",
+              default: true,
+            },
+            {
+              label: "Edit Previous",
+              value: "edit",
+              description: "Modify the current image",
+            },
+          ],
+        },
+      },
+      {
+        type: 18,
+        label: "Emoji Name",
+        component: {
+          type: 4,
+          custom_id: "emoji-name",
+          style: 1,
+          placeholder:
+            "Enter emoji name (2-32 chars, lowercase alphanumeric and underscores)",
+          required: true,
+          max_length: 32,
+          value: currentName,
+        },
+      },
+      {
+        type: 18,
+        label: "Prompt",
+        description:
+          "Enter image generation prompt (or edit instructions if editing)",
+        component: {
+          type: 4,
+          custom_id: "emoji-prompt",
+          style: 2,
+          placeholder: "Describe the emoji you want to create...",
+          required: true,
+          max_length: 500,
+          value: currentPrompt,
+        },
+      },
+    ];
+
+    if (isGif && gifOptions) {
+      baseComponents.push({
+        type: 18,
+        label: "GIF Settings (frames,fps,loop_delay)",
+        component: {
+          type: 4,
+          custom_id: "gif-settings",
+          style: 1,
+          placeholder: "e.g. 9,5,0 (frames must be 4,9,16,25)",
+          required: true,
+          max_length: 20,
+          value: `${gifOptions.frames},${gifOptions.fps},${gifOptions.loopDelay}`,
+        },
+      });
+    }
+
     return {
       custom_id: `${prefix}-reroll-modal-${previewId}-${messageId}`,
-      title: "Reroll Emoji",
-      components: [
-        {
-          type: 18,
-          label: "Generation Mode",
-          component: {
-            type: 3,
-            custom_id: "emoji-mode",
-            placeholder: "Choose how to generate...",
-            options: [
-              {
-                label: "Start Fresh",
-                value: "fresh",
-                description: "Generate a completely new image",
-                default: true,
-              },
-              {
-                label: "Edit Previous",
-                value: "edit",
-                description: "Modify the current image",
-              },
-            ],
-          },
-        },
-        {
-          type: 18,
-          label: "Emoji Name",
-          component: {
-            type: 4,
-            custom_id: "emoji-name",
-            style: 1,
-            placeholder:
-              "Enter emoji name (2-32 chars, lowercase alphanumeric and underscores)",
-            required: true,
-            max_length: 32,
-            value: currentName,
-          },
-        },
-        {
-          type: 18,
-          label: "Prompt",
-          description:
-            "Enter image generation prompt (or edit instructions if editing)",
-          component: {
-            type: 4,
-            custom_id: "emoji-prompt",
-            style: 2,
-            placeholder: "Describe the emoji you want to create...",
-            required: true,
-            max_length: 500,
-            value: currentPrompt,
-          },
-        },
-      ],
+      title: isGif ? "Reroll GIF Emoji" : "Reroll Emoji",
+      components: baseComponents,
     };
   }
 

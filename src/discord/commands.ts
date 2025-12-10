@@ -66,5 +66,33 @@ export const commandDefinitions = [
         .setName("reference")
         .setDescription("Optional reference image to base the emoji on")
         .setRequired(false),
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName("frames")
+        .setDescription("Number of frames (must be perfect square: 4, 9, 16, 25). Default: 9")
+        .setRequired(false)
+        .addChoices(
+          { name: "4 (2x2)", value: 4 },
+          { name: "9 (3x3)", value: 9 },
+          { name: "16 (4x4)", value: 16 },
+          { name: "25 (5x5)", value: 25 },
+        ),
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName("fps")
+        .setDescription("Frames per second (1-20). Default: 5")
+        .setRequired(false)
+        .setMinValue(1)
+        .setMaxValue(20),
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName("loop_delay")
+        .setDescription("Pause at end for N frames before looping. Default: 0")
+        .setRequired(false)
+        .setMinValue(0)
+        .setMaxValue(30),
     ),
 ].map((builder) => builder.toJSON());

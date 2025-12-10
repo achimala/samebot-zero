@@ -99,7 +99,16 @@ function despillMagenta(
   };
 }
 
-export async function processGifEmojiGrid(inputBuffer: Buffer): Promise<Buffer> {
+export interface GifOptions {
+  frames: number;
+  fps: number;
+  loopDelay: number;
+}
+
+export async function processGifEmojiGrid(
+  inputBuffer: Buffer,
+  options: GifOptions = { frames: 9, fps: 5, loopDelay: 0 },
+): Promise<Buffer> {
   const image = sharp(inputBuffer);
   const metadata = await image.metadata();
 
@@ -107,20 +116,23 @@ export async function processGifEmojiGrid(inputBuffer: Buffer): Promise<Buffer> 
     throw new Error("Could not read image dimensions");
   }
 
-  const frameWidth = Math.floor(metadata.width / 3);
-  const frameHeight = Math.floor(metadata.height / 3);
+  const gridSize = Math.sqrt(options.frames);
+  const frameWidth = Math.floor(metadata.width / gridSize);
+  const frameHeight = Math.floor(metadata.height / gridSize);
   const targetSize = 128;
+  const frameDelay = Math.round(1000 / options.fps);
 
   const encoder = new GIFEncoder(targetSize, targetSize, "neuquant", true);
   encoder.start();
   encoder.setRepeat(0);
-  encoder.setDelay(100);
   encoder.setQuality(1);
   encoder.setDispose(2);
   encoder.setTransparent(0x010101);
 
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 3; col++) {
+  const processedFrames: Uint8Array[] = [];
+
+  for (let row = 0; row < gridSize; row++) {
+    for (let col = 0; col < gridSize; col++) {
       const left = col * frameWidth;
       const top = row * frameHeight;
 
@@ -165,8 +177,17 @@ export async function processGifEmojiGrid(inputBuffer: Buffer): Promise<Buffer> 
         }
       }
 
-      encoder.addFrame(pixels);
+      processedFrames.push(pixels);
     }
+  }
+
+  for (let i = 0; i < processedFrames.length; i++) {
+    const isLastFrame = i === processedFrames.length - 1;
+    const delay = isLastFrame && options.loopDelay > 0
+      ? frameDelay + (frameDelay * options.loopDelay)
+      : frameDelay;
+    encoder.setDelay(delay);
+    encoder.addFrame(processedFrames[i]!);
   }
 
   encoder.finish();
