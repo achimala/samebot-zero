@@ -4,7 +4,8 @@ import type { Logger } from "pino";
 import type { ReferenceImage } from "./emoji-generator";
 
 const MAX_REFERENCE_IMAGES_PER_ENTITY = 3;
-const FUSE_THRESHOLD = 0.25;
+const FUSE_THRESHOLD = 0.3;
+const MIN_MATCH_SCORE = 0.7;
 
 interface SearchableEntity {
   searchTerm: string;
@@ -51,19 +52,39 @@ export class EntityResolver {
     >();
 
     for (const word of words) {
-      const results = fuse.search(word);
+      const normalizedWord = this.normalizeWord(word);
+      
+      const exactMatch = searchableEntities.find(
+        (entity) => this.normalizeWord(entity.searchTerm) === normalizedWord,
+      );
+      if (exactMatch) {
+        const existingMatch = matchedEntities.get(exactMatch.folderName);
+        if (!existingMatch || existingMatch.score < 1.0) {
+          matchedEntities.set(exactMatch.folderName, {
+            word,
+            folder: exactMatch.folderName,
+            score: 1.0,
+          });
+        }
+        continue;
+      }
+
+      const results = fuse.search(normalizedWord);
       if (results.length > 0) {
         const topResult = results[0]!;
-        const score = 1 - (topResult.score ?? 0);
+        const rawScore = topResult.score ?? 1.0;
+        const score = 1 - rawScore;
         const folderName = topResult.item.folderName;
 
-        const existingMatch = matchedEntities.get(folderName);
-        if (!existingMatch || score > existingMatch.score) {
-          matchedEntities.set(folderName, {
-            word,
-            folder: folderName,
-            score,
-          });
+        if (score >= MIN_MATCH_SCORE) {
+          const existingMatch = matchedEntities.get(folderName);
+          if (!existingMatch || score > existingMatch.score) {
+            matchedEntities.set(folderName, {
+              word,
+              folder: folderName,
+              score,
+            });
+          }
         }
       }
     }
@@ -184,6 +205,10 @@ export class EntityResolver {
 
   private extractWords(text: string): string[] {
     return text.split(/\s+/).filter((word) => word.length >= 2);
+  }
+
+  private normalizeWord(word: string): string {
+    return word.toLowerCase().replace(/[^\w]/g, "");
   }
 
   private selectRandomItems<T>(items: T[], count: number): T[] {
