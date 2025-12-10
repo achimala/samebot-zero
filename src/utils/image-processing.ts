@@ -72,8 +72,6 @@ function calculateMagentaScore(
   const rawScore = magentaCharacteristic * brightnessBoost * 2.5;
   const clampedScore = Math.min(1, Math.max(0, rawScore));
 
-  // Apply power curve for sharper falloff - pushes mid-range values toward 1
-  // This makes the transition from opaque to transparent happen faster
   return Math.pow(clampedScore, 0.5);
 }
 
@@ -111,15 +109,22 @@ export async function processGifEmojiGrid(inputBuffer: Buffer): Promise<Buffer> 
 
   const frameWidth = Math.floor(metadata.width / 3);
   const frameHeight = Math.floor(metadata.height / 3);
+  const targetSize = 128;
 
-  const frames: Buffer[] = [];
+  const encoder = new GIFEncoder(targetSize, targetSize, "neuquant", true);
+  encoder.start();
+  encoder.setRepeat(0);
+  encoder.setDelay(100);
+  encoder.setQuality(1);
+  encoder.setDispose(2);
+  encoder.setTransparent(0x010101);
 
   for (let row = 0; row < 3; row++) {
     for (let col = 0; col < 3; col++) {
       const left = col * frameWidth;
       const top = row * frameHeight;
 
-      const frameBuffer = await image
+      const { data } = await image
         .clone()
         .extract({
           left,
@@ -127,38 +132,41 @@ export async function processGifEmojiGrid(inputBuffer: Buffer): Promise<Buffer> 
           width: frameWidth,
           height: frameHeight,
         })
-        .toBuffer();
+        .resize(targetSize, targetSize, {
+          fit: "contain",
+          background: { r: 255, g: 0, b: 255, alpha: 1 },
+        })
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
 
-      const processedFrame = await processEmojiImage(frameBuffer);
-      frames.push(processedFrame);
+      const pixels = new Uint8Array(data);
+
+      for (let i = 0; i < pixels.length; i += 4) {
+        const red = pixels[i] ?? 0;
+        const green = pixels[i + 1] ?? 0;
+        const blue = pixels[i + 2] ?? 0;
+
+        const magentaScore = calculateMagentaScore(red, green, blue);
+
+        if (magentaScore > 0.5) {
+          pixels[i] = 1;
+          pixels[i + 1] = 1;
+          pixels[i + 2] = 1;
+          pixels[i + 3] = 0;
+        } else if (magentaScore > 0.1) {
+          const despilled = despillMagenta(red, green, blue, magentaScore);
+          pixels[i] = despilled.red;
+          pixels[i + 1] = despilled.green;
+          pixels[i + 2] = despilled.blue;
+          pixels[i + 3] = 255;
+        } else {
+          pixels[i + 3] = 255;
+        }
+      }
+
+      encoder.addFrame(pixels);
     }
-  }
-
-  const gifBuffer = await createGifFromFrames(frames);
-  return gifBuffer;
-}
-
-async function createGifFromFrames(frames: Buffer[]): Promise<Buffer> {
-  const frameDelay = 100;
-  const targetSize = 128;
-
-  const encoder = new GIFEncoder(targetSize, targetSize);
-  encoder.start();
-  encoder.setRepeat(0);
-  encoder.setDelay(frameDelay);
-  encoder.setQuality(10);
-  encoder.setTransparent(0x00000000);
-
-  for (const frame of frames) {
-    const resizedBuffer = await sharp(frame)
-      .resize(targetSize, targetSize, {
-        fit: "contain",
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      })
-      .raw()
-      .toBuffer();
-
-    encoder.addFrame(resizedBuffer);
   }
 
   encoder.finish();

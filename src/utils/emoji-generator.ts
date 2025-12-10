@@ -196,9 +196,20 @@ export class EmojiGenerator {
   }
 
   private buildGifPrompt(prompt: string): string {
-    const basePrompt = `${prompt}, solid bright magenta background (#FF00FF), suitable as a Discord emoji. Will be displayed very small, so make things clear and avoid fine details or small text`;
-
-    return `${basePrompt}. Create a 3x3 grid of animation frames showing the progression of this emoji. Each frame should be as stable as possible with minimal changes between frames, arranged in a 3x3 grid layout (3 rows, 3 columns). The frames should show a smooth animation sequence from top-left to bottom-right.`;
+    return [
+      prompt,
+      "solid bright magenta background (#FF00FF) wherever it should be transparent",
+      "suitable as a Discord emoji",
+      "will be displayed very small so make things clear and avoid fine details or small text",
+      "",
+      "Create a 3x3 grid of animation frames showing the progression of this emoji.",
+      "Each frame should be as stable as possible with minimal changes between frames.",
+      "Arranged in a 3x3 grid layout (3 rows, 3 columns).",
+      "The frames should show a smooth animation sequence from top-left to bottom-right.",
+      "",
+      "IMPORTANT: Do NOT draw any borders, lines, gaps, or separators between frames.",
+      "The frames must tile directly against each other with no visible divisions.",
+    ].join(" ");
   }
 
   async postPreviewWithButtons(preview: EmojiPreview): Promise<string | null> {
