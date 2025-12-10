@@ -75,8 +75,15 @@ export class EntityResolver {
         const rawScore = topResult.score ?? 1.0;
         const score = 1 - rawScore;
         const folderName = topResult.item.folderName;
+        const normalizedEntityName = this.normalizeWord(topResult.item.searchTerm);
 
-        if (score >= MIN_MATCH_SCORE) {
+        const wordLength = normalizedWord.length;
+        const entityLength = normalizedEntityName.length;
+        const lengthRatio = wordLength < entityLength 
+          ? wordLength / entityLength 
+          : entityLength / wordLength;
+
+        if (score >= MIN_MATCH_SCORE && lengthRatio >= 0.8) {
           const existingMatch = matchedEntities.get(folderName);
           if (!existingMatch || score > existingMatch.score) {
             matchedEntities.set(folderName, {
