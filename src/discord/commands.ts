@@ -52,4 +52,19 @@ export const commandDefinitions = [
         .setDescription("Reference image for this entity")
         .setRequired(true),
     ),
+  new SlashCommandBuilder()
+    .setName("gifemoji")
+    .setDescription("Generate a new animated GIF emoji for this server")
+    .addStringOption((option) =>
+      option
+        .setName("prompt")
+        .setDescription("Describe what the animated emoji should look like")
+        .setRequired(true),
+    )
+    .addAttachmentOption((option) =>
+      option
+        .setName("reference")
+        .setDescription("Optional reference image to base the emoji on")
+        .setRequired(false),
+    ),
 ].map((builder) => builder.toJSON());
