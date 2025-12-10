@@ -338,7 +338,7 @@ export class EmojiGenerator {
     });
   }
 
-  private async ensureCapacity(emojiGuild: Guild) {
+  async ensureCapacity(emojiGuild: Guild) {
     const emojis = await emojiGuild.emojis.fetch();
     if (emojis.size >= MAX_EMOJI_SLOTS) {
       const oldestEmoji = emojis.reduce((oldest, current) =>
@@ -384,7 +384,7 @@ export class EmojiGenerator {
     }
   }
 
-  private generateEmojiName(prompt: string) {
+  generateEmojiName(prompt: string) {
     return this.ctx.openai
       .chatStructured<EmojiNameResponse>({
         messages: [

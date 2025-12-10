@@ -1,4 +1,7 @@
 import sharp from "sharp";
+import { createCanvas, loadImage } from "canvas";
+import GIFEncoder from "gifencoder";
+import { Readable } from "stream";
 
 export async function processEmojiImage(inputBuffer: Buffer): Promise<Buffer> {
   const image = sharp(inputBuffer);
@@ -98,4 +101,90 @@ function despillMagenta(
     green: Math.min(255, Math.max(0, adjustedGreen)),
     blue: Math.min(255, Math.max(0, adjustedBlue)),
   };
+}
+
+export async function processGifEmojiGrid(inputBuffer: Buffer): Promise<Buffer> {
+  const image = sharp(inputBuffer);
+  const metadata = await image.metadata();
+
+  if (!metadata.width || !metadata.height) {
+    throw new Error("Could not read image dimensions");
+  }
+
+  const frameWidth = Math.floor(metadata.width / 3);
+  const frameHeight = Math.floor(metadata.height / 3);
+
+  const frames: Buffer[] = [];
+
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      const left = col * frameWidth;
+      const top = row * frameHeight;
+
+      const frameBuffer = await image
+        .clone()
+        .extract({
+          left,
+          top,
+          width: frameWidth,
+          height: frameHeight,
+        })
+        .toBuffer();
+
+      const processedFrame = await processEmojiImage(frameBuffer);
+      frames.push(processedFrame);
+    }
+  }
+
+  const gifBuffer = await createGifFromFrames(frames);
+  return gifBuffer;
+}
+
+async function createGifFromFrames(frames: Buffer[]): Promise<Buffer> {
+  const frameDelay = 100;
+  const targetSize = 128;
+
+  const processedFrames = await Promise.all(
+    frames.map(async (frame) => {
+      return await sharp(frame)
+        .resize(targetSize, targetSize, {
+          fit: "contain",
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        })
+        .png()
+        .toBuffer();
+    }),
+  );
+
+  const canvas = createCanvas(targetSize, targetSize);
+  const encoder = new GIFEncoder(targetSize, targetSize);
+
+  encoder.start();
+  encoder.setRepeat(0);
+  encoder.setDelay(frameDelay);
+  encoder.setQuality(10);
+
+  const ctx = canvas.getContext("2d");
+
+  for (const frameBuffer of processedFrames) {
+    const image = await loadImage(frameBuffer);
+    ctx.clearRect(0, 0, targetSize, targetSize);
+    ctx.drawImage(image, 0, 0);
+    encoder.addFrame(ctx);
+  }
+
+  encoder.finish();
+
+  const chunks: Buffer[] = [];
+  const stream = encoder.out as Readable;
+
+  return new Promise((resolve, reject) => {
+    stream.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    stream.on("end", () => {
+      resolve(Buffer.concat(chunks));
+    });
+    stream.on("error", reject);
+  });
 }
