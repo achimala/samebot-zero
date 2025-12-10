@@ -1,7 +1,4 @@
 import sharp from "sharp";
-import { createCanvas, loadImage } from "canvas";
-import GIFEncoder from "gifencoder";
-import { Readable } from "stream";
 
 export async function processEmojiImage(inputBuffer: Buffer): Promise<Buffer> {
   const image = sharp(inputBuffer);
@@ -151,40 +148,24 @@ async function createGifFromFrames(frames: Buffer[]): Promise<Buffer> {
           fit: "contain",
           background: { r: 0, g: 0, b: 0, alpha: 0 },
         })
-        .png()
+        .raw()
         .toBuffer();
     }),
   );
 
-  const canvas = createCanvas(targetSize, targetSize);
-  const encoder = new GIFEncoder(targetSize, targetSize);
+  const totalHeight = targetSize * frames.length;
+  const combinedBuffer = Buffer.concat(processedFrames);
 
-  encoder.start();
-  encoder.setRepeat(0);
-  encoder.setDelay(frameDelay);
-  encoder.setQuality(10);
-
-  const ctx = canvas.getContext("2d");
-
-  for (const frameBuffer of processedFrames) {
-    const image = await loadImage(frameBuffer);
-    ctx.clearRect(0, 0, targetSize, targetSize);
-    ctx.drawImage(image, 0, 0);
-    encoder.addFrame(ctx);
-  }
-
-  encoder.finish();
-
-  const chunks: Buffer[] = [];
-  const stream = encoder.out as Readable;
-
-  return new Promise((resolve, reject) => {
-    stream.on("data", (chunk: Buffer) => {
-      chunks.push(chunk);
-    });
-    stream.on("end", () => {
-      resolve(Buffer.concat(chunks));
-    });
-    stream.on("error", reject);
-  });
+  return await sharp(combinedBuffer, {
+    raw: {
+      width: targetSize,
+      height: totalHeight,
+      channels: 4,
+    },
+  })
+    .gif({
+      delay: frameDelay,
+      loop: 0,
+    })
+    .toBuffer();
 }

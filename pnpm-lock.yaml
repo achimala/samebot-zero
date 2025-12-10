@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  canvas: 3.2.0
-
 importers:
 
   .:
@@ -20,9 +17,6 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.84.0
         version: 2.87.1
-      canvas:
-        specifier: 3.2.0
-        version: 3.2.0
       discord.js:
         specifier: ^14.25.1
         version: 14.25.1
@@ -35,9 +29,6 @@ importers:
       fuse.js:
         specifier: ^7.1.0
         version: 7.1.0
-      gifencoder:
-        specifier: ^2.0.1
-        version: 2.0.1
       luxon:
         specifier: ^3.7.2
         version: 3.7.2
@@ -63,9 +54,6 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
-      '@types/gifencoder':
-        specifier: ^2.0.3
-        version: 2.0.3
       '@types/luxon':
         specifier: ^3.7.1
         version: 3.7.1
@@ -882,9 +870,6 @@ packages:
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
-  '@types/gifencoder@2.0.3':
-    resolution: {integrity: sha512-P+d6p8WSkpIKChkGD65FjTu7A+pe8m7L+74tbuht6UUxFH9JLNE9N1EqNMKfkYpQ6Ih/jvbCA715BIXNCaUraQ==}
-
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
@@ -1085,10 +1070,6 @@ packages:
   callsites@3.1.0:
     resolution: {integrity: sha512-P8BjAsXvZS+VIDUI11hHCQEv74YT67YUi5JJFNWIqL235sBmjX4+qx9Muvls5ivyNENctx46xQLQ3aTuE7ssaQ==}
     engines: {node: '>=6'}
-
-  canvas@3.2.0:
-    resolution: {integrity: sha512-jk0GxrLtUEmW/TmFsk2WghvgHe8B0pxGilqCL21y8lHkPUGa6FTsnCNtHPOzT8O3y+N+m3espawV80bbBlgfTA==}
-    engines: {node: ^18.12.0 || >= 20.9.0}
 
   chai@6.2.1:
     resolution: {integrity: sha512-p4Z49OGG5W/WBCPSS/dH3jQ73kD6tiMmUM+bckNK6Jr5JHMG3k9bg/BvKR8lKmtVBKmOiuVaV2ws8s9oSbwysg==}
@@ -1338,9 +1319,6 @@ packages:
   get-tsconfig@4.13.0:
     resolution: {integrity: sha512-1VKTZJCwBrvbd+Wn3AOgQP/2Av+TfTCOlE4AcRJE72W1ksZXbAx8PPBR9RzgTeSPzlPMHrbANMH3LbltH73wxQ==}
 
-  gifencoder@2.0.1:
-    resolution: {integrity: sha512-x19DcyWY10SkshBpokqFOo/HBht9GB75evRYvaLMbez9p+yB/o+kt0fK9AwW59nFiAMs2UUQsjv1lX/hvu9Ong==}
-
   github-from-package@0.0.0:
     resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
 
@@ -1541,9 +1519,6 @@ packages:
   node-abi@3.85.0:
     resolution: {integrity: sha512-zsFhmbkAzwhTft6nd3VxcG0cvJsT70rL+BIGHWVq5fi6MwGrHwzqKaxXE+Hl2GmnGItnDKPPkO5/LQqjVkIdFg==}
     engines: {node: '>=10'}
-
-  node-addon-api@7.1.1:
-    resolution: {integrity: sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ==}
 
   node-domexception@1.0.0:
     resolution: {integrity: sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ==}
@@ -2637,10 +2612,6 @@ snapshots:
 
   '@types/estree@1.0.8': {}
 
-  '@types/gifencoder@2.0.3':
-    dependencies:
-      '@types/node': 24.10.3
-
   '@types/json-schema@7.0.15': {}
 
   '@types/luxon@3.7.1': {}
@@ -2867,11 +2838,6 @@ snapshots:
   cac@6.7.14: {}
 
   callsites@3.1.0: {}
-
-  canvas@3.2.0:
-    dependencies:
-      node-addon-api: 7.1.1
-      prebuild-install: 7.1.3
 
   chai@6.2.1: {}
 
@@ -3177,10 +3143,6 @@ snapshots:
     dependencies:
       resolve-pkg-maps: 1.0.0
 
-  gifencoder@2.0.1:
-    dependencies:
-      canvas: 3.2.0
-
   github-from-package@0.0.0: {}
 
   glob-parent@6.0.2:
@@ -3369,8 +3331,6 @@ snapshots:
   node-abi@3.85.0:
     dependencies:
       semver: 7.7.3
-
-  node-addon-api@7.1.1: {}
 
   node-domexception@1.0.0: {}
 
