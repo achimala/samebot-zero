@@ -50,6 +50,12 @@
   "pnpm": {
     "overrides": {
       "canvas": "3.2.0"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "canvas",
+      "sharp",
+      "better-sqlite3",
+      "esbuild"
+    ]
   }
 }
