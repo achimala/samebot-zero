@@ -30,8 +30,9 @@ export class GifCommandFeature implements Feature {
     const frames = interaction.options.getInteger("frames") ?? DEFAULT_GIF_OPTIONS.frames;
     const fps = interaction.options.getInteger("fps") ?? DEFAULT_GIF_OPTIONS.fps;
     const loopDelay = interaction.options.getInteger("loop_delay") ?? DEFAULT_GIF_OPTIONS.loopDelay;
+    const removeBackground = interaction.options.getBoolean("remove_background") ?? true;
 
-    const gifOptions: GifOptions = { frames, fps, loopDelay };
+    const gifOptions: GifOptions = { frames, fps, loopDelay, removeBackground };
 
     await interaction.deferReply();
 
