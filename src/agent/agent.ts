@@ -76,7 +76,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
           description: "Whether to generate an animated GIF instead of a static image (defaults to false)",
         },
       },
-      required: ["prompt", "aspectRatio", "imageSize"],
+      required: ["prompt", "aspectRatio", "imageSize", "isGif"],
       additionalProperties: false,
     },
   },
