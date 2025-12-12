@@ -115,13 +115,11 @@ export class ScrapbookFeature implements Feature {
       if (m.role !== "user") {
         continue;
       }
-      const authorMatch = m.content.match(/^([^:]+): (.+)$/);
-      const author = authorMatch?.[1] ?? "unknown";
-      const content = authorMatch?.[2] ?? m.content;
+      const author = m.author ?? "unknown";
       messages.push({
         id: m.id,
         author,
-        content,
+        content: m.content,
         timestamp: m.timestamp,
       });
     }
