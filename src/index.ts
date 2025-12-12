@@ -14,6 +14,7 @@ import { DankResponseFeature } from "./features/dank-response";
 import { UsaCowboyFeature } from "./features/usa-cowboy";
 import { SamebotEmojiFeature } from "./features/samebot-emoji";
 import { GifEmojiFeature } from "./features/gif-emoji";
+import { GifCommandFeature } from "./features/gif-command";
 import { RobotEmojiReactFeature } from "./features/robot-emoji-react";
 import { RememberImageFeature } from "./features/remember-image";
 import { ScrapbookFeature } from "./features/scrapbook";
@@ -63,6 +64,7 @@ async function main() {
     new UsaCowboyFeature(),
     new SamebotEmojiFeature(),
     new GifEmojiFeature(),
+    new GifCommandFeature(),
     new RobotEmojiReactFeature(),
     new RememberImageFeature(),
     new ScrapbookFeature(),
