@@ -14,7 +14,10 @@ import type { SupabaseClient } from "../supabase/client";
 import type { EntityResolver } from "../utils/entity-resolver";
 import type { DiscordAdapter } from "../adapters/discord";
 import type { AgentContext, AgentResponse } from "./types";
-import { processGifEmojiGrid } from "../utils/image-processing";
+import {
+  processGifEmojiGrid,
+  buildGifPrompt,
+} from "../utils/image-processing";
 import { DEFAULT_GIF_OPTIONS } from "../utils/emoji-generator";
 
 const MAX_TOOL_ITERATIONS = 10;
@@ -639,7 +642,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
 
         if (isGif) {
           const gridSize = Math.sqrt(DEFAULT_GIF_OPTIONS.frames);
-          effectivePrompt = this.buildGifPrompt(effectivePrompt, gridSize);
+          effectivePrompt = buildGifPrompt(effectivePrompt, gridSize, false);
         }
 
         const placeholderMessage = await this.adapter.sendPlaceholderMessage(
@@ -1014,19 +1017,5 @@ Note: Any reference images provided are used as references for generation, not a
       "Failed to generate image prompt for scrapbook memory",
     );
     return null;
-  }
-
-  private buildGifPrompt(prompt: string, gridSize: number): string {
-    return [
-      prompt,
-      "",
-      `Create a ${gridSize}x${gridSize} grid of animation frames showing the progression of this scene.`,
-      "Each frame should be as stable as possible with minimal changes between frames.",
-      `Arranged in a ${gridSize}x${gridSize} grid layout (${gridSize} rows, ${gridSize} columns).`,
-      "The frames should show a smooth animation sequence from top-left to bottom-right.",
-      "",
-      "IMPORTANT: Do NOT draw any borders, lines, gaps, or separators between frames.",
-      "The frames must tile directly against each other with no visible divisions.",
-    ].join(" ");
   }
 }

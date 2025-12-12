@@ -12,6 +12,7 @@ import type { RuntimeContext } from "../core/runtime";
 import {
   processEmojiImage,
   processGifEmojiGrid,
+  buildGifPrompt,
   type GifOptions,
 } from "./image-processing";
 import { EntityResolver } from "./entity-resolver";
@@ -165,7 +166,7 @@ export class EmojiGenerator {
         })();
 
     const gridSize = Math.sqrt(gifOptions.frames);
-    const gifPrompt = this.buildGifPrompt(effectivePrompt, gridSize);
+    const gifPrompt = buildGifPrompt(effectivePrompt, gridSize, true);
     const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
       prompt: gifPrompt,
       aspectRatio: "1:1",
@@ -211,22 +212,6 @@ export class EmojiGenerator {
     }
   }
 
-  private buildGifPrompt(prompt: string, gridSize: number): string {
-    return [
-      prompt,
-      "solid bright magenta background (#FF00FF) wherever it should be transparent",
-      "suitable as a Discord emoji",
-      "will be displayed very small so make things clear and avoid fine details or small text",
-      "",
-      `Create a ${gridSize}x${gridSize} grid of animation frames showing the progression of this emoji.`,
-      "Each frame should be as stable as possible with minimal changes between frames.",
-      `Arranged in a ${gridSize}x${gridSize} grid layout (${gridSize} rows, ${gridSize} columns).`,
-      "The frames should show a smooth animation sequence from top-left to bottom-right.",
-      "",
-      "IMPORTANT: Do NOT draw any borders, lines, gaps, or separators between frames.",
-      "The frames must tile directly against each other with no visible divisions.",
-    ].join(" ");
-  }
 
   async postPreviewWithButtons(preview: EmojiPreview): Promise<string | null> {
     const emojiGuild = this.ctx.discord.guilds.cache.get(

@@ -105,6 +105,35 @@ export interface GifOptions {
   loopDelay: number;
 }
 
+export function buildGifPrompt(
+  prompt: string,
+  gridSize: number,
+  isEmoji: boolean = false,
+): string {
+  const parts: string[] = [prompt];
+
+  if (isEmoji) {
+    parts.push(
+      "solid bright magenta background (#FF00FF) wherever it should be transparent",
+      "suitable as a Discord emoji",
+      "will be displayed very small so make things clear and avoid fine details or small text",
+      "",
+    );
+  }
+
+  parts.push(
+    `Create a ${gridSize}x${gridSize} grid of animation frames showing the progression of ${isEmoji ? "this emoji" : "this scene"}.`,
+    "Each frame should be as stable as possible with minimal changes between frames.",
+    `Arranged in a ${gridSize}x${gridSize} grid layout (${gridSize} rows, ${gridSize} columns).`,
+    "The frames should show a smooth animation sequence from top-left to bottom-right.",
+    "",
+    "IMPORTANT: Do NOT draw any borders, lines, gaps, or separators between frames.",
+    "The frames must tile directly against each other with no visible divisions.",
+  );
+
+  return parts.join(" ");
+}
+
 export async function processGifEmojiGrid(
   inputBuffer: Buffer,
   options: GifOptions = { frames: 9, fps: 5, loopDelay: 0 },
