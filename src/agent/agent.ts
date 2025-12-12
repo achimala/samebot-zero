@@ -14,6 +14,11 @@ import type { SupabaseClient } from "../supabase/client";
 import type { EntityResolver } from "../utils/entity-resolver";
 import type { DiscordAdapter } from "../adapters/discord";
 import type { AgentContext, AgentResponse } from "./types";
+import {
+  processGifEmojiGrid,
+  buildGifPrompt,
+} from "../utils/image-processing";
+import { DEFAULT_GIF_OPTIONS } from "../utils/emoji-generator";
 
 const MAX_TOOL_ITERATIONS = 10;
 
@@ -48,7 +53,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "generate_image",
     description:
-      "Generate an image based on a text prompt. Use this when asked to create, draw, or generate images.",
+      "Generate an image based on a text prompt. Use this when asked to create, draw, or generate images. Set isGif to true to generate an animated GIF instead of a static image.",
     parameters: {
       type: "object",
       properties: {
@@ -65,6 +70,10 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
           type: ["string", "null"],
           enum: ["1K", "2K", "4K"],
           description: "The resolution of the image (defaults to 1K)",
+        },
+        isGif: {
+          type: "boolean",
+          description: "Whether to generate an animated GIF instead of a static image (defaults to false)",
         },
       },
       required: ["prompt", "aspectRatio", "imageSize"],
@@ -613,6 +622,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           | "2K"
           | "4K"
           | undefined;
+        const isGif = (toolCall.arguments.isGif as boolean | undefined) ?? false;
 
         let effectivePrompt = prompt;
         const referenceImages: Array<{ data: string; mimeType: string }> = [];
@@ -628,6 +638,11 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           if (built.referenceImages) {
             referenceImages.push(...built.referenceImages);
           }
+        }
+
+        if (isGif) {
+          const gridSize = Math.sqrt(DEFAULT_GIF_OPTIONS.frames);
+          effectivePrompt = buildGifPrompt(effectivePrompt, gridSize, false);
         }
 
         const placeholderMessage = await this.adapter.sendPlaceholderMessage(
@@ -665,16 +680,37 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         let resultMessage = "";
         await imageResult.match(
           async ({ buffer }) => {
+            let finalBuffer = buffer;
+            const fileExtension = isGif ? "gif" : "png";
+            const fileName = `samebot-image.${fileExtension}`;
+
+            if (isGif) {
+              try {
+                finalBuffer = await processGifEmojiGrid(buffer, DEFAULT_GIF_OPTIONS);
+              } catch (error) {
+                this.logger.error({ err: error }, "Failed to process GIF");
+                if (placeholderMessage) {
+                  await this.adapter.editMessage(
+                    channelId,
+                    placeholderMessage.messageId,
+                    `failed to process GIF: ${error instanceof Error ? error.message : "unknown error"}`,
+                  );
+                }
+                resultMessage = `Failed to process GIF: ${error instanceof Error ? error.message : "unknown error"}`;
+                return;
+              }
+            }
+
             if (placeholderMessage) {
               const editResult = await this.adapter.editMessageWithImage(
                 channelId,
                 placeholderMessage.messageId,
-                buffer,
-                "samebot-image.png",
+                finalBuffer,
+                fileName,
                 prompt,
               );
               if (editResult.success) {
-                resultMessage = `Successfully generated and sent image for: ${prompt}`;
+                resultMessage = `Successfully generated and sent ${isGif ? "GIF" : "image"} for: ${prompt}`;
               } else {
                 this.logger.error(
                   { err: editResult.error },
@@ -682,31 +718,31 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 );
                 const sendResult = await this.adapter.sendImage(
                   channelId,
-                  buffer,
-                  "samebot-image.png",
+                  finalBuffer,
+                  fileName,
                   prompt,
                 );
                 if (sendResult.success) {
-                  resultMessage = `Successfully generated and sent image for: ${prompt}`;
+                  resultMessage = `Successfully generated and sent ${isGif ? "GIF" : "image"} for: ${prompt}`;
                 } else {
-                  resultMessage = `Generated image but failed to send it`;
+                  resultMessage = `Generated ${isGif ? "GIF" : "image"} but failed to send it`;
                 }
               }
             } else {
               const sendResult = await this.adapter.sendImage(
                 channelId,
-                buffer,
-                "samebot-image.png",
+                finalBuffer,
+                fileName,
                 prompt,
               );
               if (sendResult.success) {
-                resultMessage = `Successfully generated and sent image for: ${prompt}`;
+                resultMessage = `Successfully generated and sent ${isGif ? "GIF" : "image"} for: ${prompt}`;
               } else {
                 this.logger.error(
                   { err: sendResult.error },
                   "Failed to send image",
                 );
-                resultMessage = `Generated image but failed to send it`;
+                resultMessage = `Generated ${isGif ? "GIF" : "image"} but failed to send it`;
               }
             }
           },
