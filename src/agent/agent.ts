@@ -965,7 +965,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
     const authorText = Array.from(authors).join(" ");
 
     const entityResolution = await this.entityResolver.resolve(authorText);
-    let basePrompt = `Create an image prompt for this memory. Use the full conversation context to capture the scene:\n\nConversation context:\n${contextText}\n\nKey quote: "${memory.keyMessage}" - ${memory.author}`;
+    let basePrompt = `Create an image prompt based on this conversation. Use the full conversation context to capture the scene:\n\nConversation context:\n${contextText}\n\nKey quote: "${memory.keyMessage}" - ${memory.author}`;
     let referenceImages: Array<{ data: string; mimeType: string }> | undefined;
 
     if (entityResolution) {
@@ -978,8 +978,8 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
       messages: [
         {
           role: "system",
-          content: `You create artistic image prompts for nostalgic chat memories.
-Given a memorable chat quote and its full conversation context, create a creative, whimsical image prompt that captures the scene and essence of the moment.
+          content: `You create artistic image prompts based on chat conversations.
+Given a chat quote and its full conversation context, create a creative, whimsical image prompt that captures the scene and essence of the moment.
 The image should be surreal, artistic, and evocative - not a literal depiction.
 Use the entire conversation context to understand the scene, mood, and setting of the moment.
 Keep the prompt concise (under 100 words).
