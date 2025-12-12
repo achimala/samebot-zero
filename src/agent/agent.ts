@@ -14,15 +14,10 @@ import type { SupabaseClient } from "../supabase/client";
 import type { EntityResolver } from "../utils/entity-resolver";
 import type { DiscordAdapter } from "../adapters/discord";
 import type { AgentContext, AgentResponse } from "./types";
-import { processGifGrid, type GifOptions } from "../utils/image-processing";
+import { processGifEmojiGrid } from "../utils/image-processing";
+import { DEFAULT_GIF_OPTIONS } from "../utils/emoji-generator";
 
 const MAX_TOOL_ITERATIONS = 10;
-
-const DEFAULT_GIF_OPTIONS: GifOptions = {
-  frames: 9,
-  fps: 5,
-  loopDelay: 0,
-};
 
 const PERSONA = `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic British tone.
 you're quintessentially British - use British spellings (colour, realise, organise, etc.), British expressions ("brilliant", "cheers", "bloody hell", "right", "proper", "bit", "quite", "rather"), and British humour (dry wit, understatement, self-deprecation).
@@ -688,7 +683,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
 
             if (isGif) {
               try {
-                finalBuffer = await processGifGrid(buffer, DEFAULT_GIF_OPTIONS);
+                finalBuffer = await processGifEmojiGrid(buffer, DEFAULT_GIF_OPTIONS);
               } catch (error) {
                 this.logger.error({ err: error }, "Failed to process GIF");
                 if (placeholderMessage) {
