@@ -103,18 +103,24 @@ export interface GifOptions {
   frames: number;
   fps: number;
   loopDelay: number;
+  removeBackground?: boolean;
 }
 
 export function buildGifPrompt(
   prompt: string,
   gridSize: number,
   isEmoji: boolean = false,
+  removeBackground: boolean = true,
 ): string {
   const parts: string[] = [prompt];
 
   if (isEmoji) {
+    if (removeBackground) {
+      parts.push(
+        "solid bright magenta background (#FF00FF) wherever it should be transparent",
+      );
+    }
     parts.push(
-      "solid bright magenta background (#FF00FF) wherever it should be transparent",
       "suitable as a Discord emoji",
       "will be displayed very small so make things clear and avoid fine details or small text",
       "",
@@ -150,6 +156,7 @@ export async function processGifEmojiGrid(
   const frameHeight = Math.floor(metadata.height / gridSize);
   const targetSize = 128;
   const frameDelay = Math.round(1000 / options.fps);
+  const removeBackground = options.removeBackground !== false;
 
   const encoder = new GIFEncoder(targetSize, targetSize, "neuquant", true);
   encoder.start();
@@ -165,6 +172,16 @@ export async function processGifEmojiGrid(
       const left = col * frameWidth;
       const top = row * frameHeight;
 
+      const resizeOptions: {
+        fit: "contain";
+        background?: { r: number; g: number; b: number; alpha: number };
+      } = {
+        fit: "contain",
+      };
+      if (removeBackground) {
+        resizeOptions.background = { r: 255, g: 0, b: 255, alpha: 1 };
+      }
+
       const { data } = await image
         .clone()
         .extract({
@@ -173,35 +190,38 @@ export async function processGifEmojiGrid(
           width: frameWidth,
           height: frameHeight,
         })
-        .resize(targetSize, targetSize, {
-          fit: "contain",
-          background: { r: 255, g: 0, b: 255, alpha: 1 },
-        })
+        .resize(targetSize, targetSize, resizeOptions)
         .ensureAlpha()
         .raw()
         .toBuffer({ resolveWithObject: true });
 
       const pixels = new Uint8Array(data);
 
-      for (let i = 0; i < pixels.length; i += 4) {
-        const red = pixels[i] ?? 0;
-        const green = pixels[i + 1] ?? 0;
-        const blue = pixels[i + 2] ?? 0;
+      if (removeBackground) {
+        for (let i = 0; i < pixels.length; i += 4) {
+          const red = pixels[i] ?? 0;
+          const green = pixels[i + 1] ?? 0;
+          const blue = pixels[i + 2] ?? 0;
 
-        const magentaScore = calculateMagentaScore(red, green, blue);
+          const magentaScore = calculateMagentaScore(red, green, blue);
 
-        if (magentaScore > 0.5) {
-          pixels[i] = 1;
-          pixels[i + 1] = 1;
-          pixels[i + 2] = 1;
-          pixels[i + 3] = 0;
-        } else if (magentaScore > 0.1) {
-          const despilled = despillMagenta(red, green, blue, magentaScore);
-          pixels[i] = despilled.red;
-          pixels[i + 1] = despilled.green;
-          pixels[i + 2] = despilled.blue;
-          pixels[i + 3] = 255;
-        } else {
+          if (magentaScore > 0.5) {
+            pixels[i] = 1;
+            pixels[i + 1] = 1;
+            pixels[i + 2] = 1;
+            pixels[i + 3] = 0;
+          } else if (magentaScore > 0.1) {
+            const despilled = despillMagenta(red, green, blue, magentaScore);
+            pixels[i] = despilled.red;
+            pixels[i + 1] = despilled.green;
+            pixels[i + 2] = despilled.blue;
+            pixels[i + 3] = 255;
+          } else {
+            pixels[i + 3] = 255;
+          }
+        }
+      } else {
+        for (let i = 0; i < pixels.length; i += 4) {
           pixels[i + 3] = 255;
         }
       }

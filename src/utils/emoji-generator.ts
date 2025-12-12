@@ -34,6 +34,7 @@ export const DEFAULT_GIF_OPTIONS: GifOptions = {
   frames: 9,
   fps: 5,
   loopDelay: 0,
+  removeBackground: true,
 };
 
 export interface EmojiPreview {
@@ -166,7 +167,8 @@ export class EmojiGenerator {
         })();
 
     const gridSize = Math.sqrt(gifOptions.frames);
-    const gifPrompt = buildGifPrompt(effectivePrompt, gridSize, true);
+    const removeBackground = gifOptions.removeBackground !== false;
+    const gifPrompt = buildGifPrompt(effectivePrompt, gridSize, true, removeBackground);
     const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
       prompt: gifPrompt,
       aspectRatio: "1:1",
@@ -371,6 +373,19 @@ export class EmojiGenerator {
           required: true,
           max_length: 20,
           value: `${gifOptions.frames},${gifOptions.fps},${gifOptions.loopDelay}`,
+        },
+      });
+      baseComponents.push({
+        type: 18,
+        label: "Remove Background",
+        component: {
+          type: 4,
+          custom_id: "gif-remove-background",
+          style: 1,
+          placeholder: "true or false (default: true)",
+          required: false,
+          max_length: 5,
+          value: String(gifOptions.removeBackground !== false),
         },
       });
     }

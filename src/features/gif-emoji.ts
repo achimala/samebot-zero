@@ -60,8 +60,9 @@ export class GifEmojiFeature implements Feature {
     const frames = interaction.options.getInteger("frames") ?? DEFAULT_GIF_OPTIONS.frames;
     const fps = interaction.options.getInteger("fps") ?? DEFAULT_GIF_OPTIONS.fps;
     const loopDelay = interaction.options.getInteger("loop_delay") ?? DEFAULT_GIF_OPTIONS.loopDelay;
+    const removeBackground = interaction.options.getBoolean("remove_background") ?? true;
 
-    const gifOptions: GifOptions = { frames, fps, loopDelay };
+    const gifOptions: GifOptions = { frames, fps, loopDelay, removeBackground };
 
     let referenceImages: ReferenceImage[] | undefined;
     if (
@@ -199,8 +200,13 @@ export class GifEmojiFeature implements Feature {
     const nameInput = interaction.fields.getTextInputValue("emoji-name");
     const promptInput = interaction.fields.getTextInputValue("emoji-prompt");
     const gifSettingsInput = interaction.fields.getTextInputValue("gif-settings");
+    const removeBackgroundInput = interaction.fields.getTextInputValue("gif-remove-background");
 
     const gifOptions = this.parseGifSettings(gifSettingsInput, preview.gifOptions);
+    if (removeBackgroundInput) {
+      const removeBackgroundValue = removeBackgroundInput.toLowerCase().trim();
+      gifOptions.removeBackground = removeBackgroundValue === "true" || removeBackgroundValue === "yes" || removeBackgroundValue === "1";
+    }
 
     const message = await interaction.channel.messages.fetch(messageId);
     if (!message) {
@@ -274,6 +280,7 @@ export class GifEmojiFeature implements Feature {
       frames: validFrames.includes(frames) ? frames : defaults.frames,
       fps: fps >= 1 && fps <= 20 ? fps : defaults.fps,
       loopDelay: loopDelay >= 0 && loopDelay <= 30 ? loopDelay : defaults.loopDelay,
+      removeBackground: defaults.removeBackground,
     };
   }
 
