@@ -410,7 +410,7 @@ export class EmojiGenerator {
     }
 
     try {
-      await this.ensureCapacity(emojiGuild);
+      await this.ensureCapacity(emojiGuild, preview.isGif ?? false);
 
       const createdEmoji = await emojiGuild.emojis.create({
         attachment: preview.buffer,
@@ -476,16 +476,18 @@ export class EmojiGenerator {
     });
   }
 
-  async ensureCapacity(emojiGuild: Guild) {
+  async ensureCapacity(emojiGuild: Guild, isGif: boolean) {
     const emojis = await emojiGuild.emojis.fetch();
-    if (emojis.size >= MAX_EMOJI_SLOTS) {
-      const oldestEmoji = emojis.reduce((oldest, current) =>
+    const emojisOfType = emojis.filter((emoji) => emoji.animated === isGif);
+    
+    if (emojisOfType.size >= MAX_EMOJI_SLOTS) {
+      const oldestEmoji = emojisOfType.reduce((oldest, current) =>
         oldest.id < current.id ? oldest : current,
       );
       const deletedName = oldestEmoji.name;
       await oldestEmoji.delete();
       this.ctx.logger.info(
-        { emojiId: oldestEmoji.id, emojiName: deletedName },
+        { emojiId: oldestEmoji.id, emojiName: deletedName, isGif },
         "Deleted oldest emoji to make room",
       );
       await this.announcePurgedEmoji(emojiGuild, deletedName);
