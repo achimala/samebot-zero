@@ -14,8 +14,15 @@ import type { SupabaseClient } from "../supabase/client";
 import type { EntityResolver } from "../utils/entity-resolver";
 import type { DiscordAdapter } from "../adapters/discord";
 import type { AgentContext, AgentResponse } from "./types";
+import { processGifGrid, type GifOptions } from "../utils/image-processing";
 
 const MAX_TOOL_ITERATIONS = 10;
+
+const DEFAULT_GIF_OPTIONS: GifOptions = {
+  frames: 9,
+  fps: 5,
+  loopDelay: 0,
+};
 
 const PERSONA = `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic British tone.
 you're quintessentially British - use British spellings (colour, realise, organise, etc.), British expressions ("brilliant", "cheers", "bloody hell", "right", "proper", "bit", "quite", "rather"), and British humour (dry wit, understatement, self-deprecation).
@@ -48,7 +55,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "generate_image",
     description:
-      "Generate an image based on a text prompt. Use this when asked to create, draw, or generate images.",
+      "Generate an image based on a text prompt. Use this when asked to create, draw, or generate images. Set isGif to true to generate an animated GIF instead of a static image.",
     parameters: {
       type: "object",
       properties: {
@@ -65,6 +72,10 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
           type: ["string", "null"],
           enum: ["1K", "2K", "4K"],
           description: "The resolution of the image (defaults to 1K)",
+        },
+        isGif: {
+          type: "boolean",
+          description: "Whether to generate an animated GIF instead of a static image (defaults to false)",
         },
       },
       required: ["prompt", "aspectRatio", "imageSize"],
@@ -613,6 +624,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           | "2K"
           | "4K"
           | undefined;
+        const isGif = (toolCall.arguments.isGif as boolean | undefined) ?? false;
 
         let effectivePrompt = prompt;
         const referenceImages: Array<{ data: string; mimeType: string }> = [];
@@ -628,6 +640,11 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           if (built.referenceImages) {
             referenceImages.push(...built.referenceImages);
           }
+        }
+
+        if (isGif) {
+          const gridSize = Math.sqrt(DEFAULT_GIF_OPTIONS.frames);
+          effectivePrompt = this.buildGifPrompt(effectivePrompt, gridSize);
         }
 
         const placeholderMessage = await this.adapter.sendPlaceholderMessage(
@@ -665,16 +682,37 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         let resultMessage = "";
         await imageResult.match(
           async ({ buffer }) => {
+            let finalBuffer = buffer;
+            const fileExtension = isGif ? "gif" : "png";
+            const fileName = `samebot-image.${fileExtension}`;
+
+            if (isGif) {
+              try {
+                finalBuffer = await processGifGrid(buffer, DEFAULT_GIF_OPTIONS);
+              } catch (error) {
+                this.logger.error({ err: error }, "Failed to process GIF");
+                if (placeholderMessage) {
+                  await this.adapter.editMessage(
+                    channelId,
+                    placeholderMessage.messageId,
+                    `failed to process GIF: ${error instanceof Error ? error.message : "unknown error"}`,
+                  );
+                }
+                resultMessage = `Failed to process GIF: ${error instanceof Error ? error.message : "unknown error"}`;
+                return;
+              }
+            }
+
             if (placeholderMessage) {
               const editResult = await this.adapter.editMessageWithImage(
                 channelId,
                 placeholderMessage.messageId,
-                buffer,
-                "samebot-image.png",
+                finalBuffer,
+                fileName,
                 prompt,
               );
               if (editResult.success) {
-                resultMessage = `Successfully generated and sent image for: ${prompt}`;
+                resultMessage = `Successfully generated and sent ${isGif ? "GIF" : "image"} for: ${prompt}`;
               } else {
                 this.logger.error(
                   { err: editResult.error },
@@ -682,31 +720,31 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 );
                 const sendResult = await this.adapter.sendImage(
                   channelId,
-                  buffer,
-                  "samebot-image.png",
+                  finalBuffer,
+                  fileName,
                   prompt,
                 );
                 if (sendResult.success) {
-                  resultMessage = `Successfully generated and sent image for: ${prompt}`;
+                  resultMessage = `Successfully generated and sent ${isGif ? "GIF" : "image"} for: ${prompt}`;
                 } else {
-                  resultMessage = `Generated image but failed to send it`;
+                  resultMessage = `Generated ${isGif ? "GIF" : "image"} but failed to send it`;
                 }
               }
             } else {
               const sendResult = await this.adapter.sendImage(
                 channelId,
-                buffer,
-                "samebot-image.png",
+                finalBuffer,
+                fileName,
                 prompt,
               );
               if (sendResult.success) {
-                resultMessage = `Successfully generated and sent image for: ${prompt}`;
+                resultMessage = `Successfully generated and sent ${isGif ? "GIF" : "image"} for: ${prompt}`;
               } else {
                 this.logger.error(
                   { err: sendResult.error },
                   "Failed to send image",
                 );
-                resultMessage = `Generated image but failed to send it`;
+                resultMessage = `Generated ${isGif ? "GIF" : "image"} but failed to send it`;
               }
             }
           },
@@ -981,5 +1019,19 @@ Note: Any reference images provided are used as references for generation, not a
       "Failed to generate image prompt for scrapbook memory",
     );
     return null;
+  }
+
+  private buildGifPrompt(prompt: string, gridSize: number): string {
+    return [
+      prompt,
+      "",
+      `Create a ${gridSize}x${gridSize} grid of animation frames showing the progression of this scene.`,
+      "Each frame should be as stable as possible with minimal changes between frames.",
+      `Arranged in a ${gridSize}x${gridSize} grid layout (${gridSize} rows, ${gridSize} columns).`,
+      "The frames should show a smooth animation sequence from top-left to bottom-right.",
+      "",
+      "IMPORTANT: Do NOT draw any borders, lines, gaps, or separators between frames.",
+      "The frames must tile directly against each other with no visible divisions.",
+    ].join(" ");
   }
 }
