@@ -185,6 +185,8 @@ export class ConversationFeature implements Feature {
     );
     
     let userMessageContent = incomingMessage.content || "";
+    let aphorismReply: string | null = null;
+    
     if (userMessageContent.length > 0) {
       const shouldConvert = await shouldConvertToAphorism(
         userMessageContent,
@@ -200,6 +202,7 @@ export class ConversationFeature implements Feature {
         );
         if (converted) {
           userMessageContent = converted;
+          aphorismReply = converted;
         }
       }
     }
@@ -233,6 +236,26 @@ export class ConversationFeature implements Feature {
           });
         }
       }
+    }
+
+    if (aphorismReply) {
+      await this.adapter.sendTyping(message.channelId);
+      const sendResult = await this.adapter.sendMessage(
+        message.channelId,
+        aphorismReply,
+      );
+      if (sendResult.messageId) {
+        context.history.push({
+          id: sendResult.messageId,
+          role: "assistant",
+          content: aphorismReply,
+          timestamp: Date.now(),
+        });
+      }
+      context.history = context.history.slice(-50);
+      context.lastResponseAt = Date.now();
+      this.contexts.set(key, context);
+      return;
     }
 
     const agentContext = this.toAgentContext(context);
