@@ -10,6 +10,10 @@ import type {
 } from "../agent/types";
 import { DiscordAdapter } from "../adapters/discord";
 import { EntityResolver } from "../utils/entity-resolver";
+import {
+  shouldConvertToAphorism,
+  convertToAphorism,
+} from "../utils/aphorism-converter";
 
 const AUTO_REACT_PROBABILITY = 0.15;
 const SAY_SAME_PROBABILITY = 0.2;
@@ -244,15 +248,37 @@ export class ConversationFeature implements Feature {
     }
 
     if (response.text && response.text.length > 0) {
+      let finalResponseText = response.text;
+
+      const contextText = this.agent.formatContextText(agentContext);
+      const shouldConvert = await shouldConvertToAphorism(
+        response.text,
+        contextText,
+        this.ctx.openai,
+        this.ctx.logger,
+      );
+
+      if (shouldConvert) {
+        const converted = await convertToAphorism(
+          response.text,
+          contextText,
+          this.ctx.openai,
+          this.ctx.logger,
+        );
+        if (converted) {
+          finalResponseText = converted;
+        }
+      }
+
       const sendResult = await this.adapter.sendMessage(
         message.channelId,
-        response.text,
+        finalResponseText,
       );
       if (sendResult.messageId) {
         context.history.push({
           id: sendResult.messageId,
           role: "assistant",
-          content: response.text,
+          content: finalResponseText,
           timestamp: Date.now(),
         });
       }
