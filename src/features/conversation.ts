@@ -183,7 +183,31 @@ export class ConversationFeature implements Feature {
       message,
       this.botUserId,
     );
-    const agentMessage = this.toAgentMessage(incomingMessage);
+    
+    let userMessageContent = incomingMessage.content || "";
+    if (userMessageContent.length > 0) {
+      const shouldConvert = await shouldConvertToAphorism(
+        userMessageContent,
+        this.ctx.openai,
+        this.ctx.logger,
+      );
+
+      if (shouldConvert) {
+        const converted = await convertToAphorism(
+          userMessageContent,
+          this.ctx.openai,
+          this.ctx.logger,
+        );
+        if (converted) {
+          userMessageContent = converted;
+        }
+      }
+    }
+
+    const agentMessage = this.toAgentMessage({
+      ...incomingMessage,
+      content: userMessageContent,
+    });
     context.history.push(agentMessage);
     context.history = context.history.slice(-50);
     this.contexts.set(key, context);
@@ -248,37 +272,15 @@ export class ConversationFeature implements Feature {
     }
 
     if (response.text && response.text.length > 0) {
-      let finalResponseText = response.text;
-
-      const contextText = this.agent.formatContextText(agentContext);
-      const shouldConvert = await shouldConvertToAphorism(
-        response.text,
-        contextText,
-        this.ctx.openai,
-        this.ctx.logger,
-      );
-
-      if (shouldConvert) {
-        const converted = await convertToAphorism(
-          response.text,
-          contextText,
-          this.ctx.openai,
-          this.ctx.logger,
-        );
-        if (converted) {
-          finalResponseText = converted;
-        }
-      }
-
       const sendResult = await this.adapter.sendMessage(
         message.channelId,
-        finalResponseText,
+        response.text,
       );
       if (sendResult.messageId) {
         context.history.push({
           id: sendResult.messageId,
           role: "assistant",
-          content: finalResponseText,
+          content: response.text,
           timestamp: Date.now(),
         });
       }

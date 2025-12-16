@@ -5,7 +5,6 @@ const APHORISM_CONVERSION_PROBABILITY = 0.05;
 
 export async function shouldConvertToAphorism(
   message: string,
-  context: string,
   openai: OpenAIClient,
   logger: Logger,
 ): Promise<boolean> {
@@ -13,26 +12,13 @@ export async function shouldConvertToAphorism(
     return false;
   }
 
-  const systemMessage = `You are determining whether a message would be appropriate to convert into a Confucian-style classical Chinese aphorism.
+  const systemMessage = `You are determining whether a user message is trivial or stupid (like "hi", "lol", "ok", etc.).
 
-Convert to aphorism when:
-- The message contains wisdom, advice, or philosophical insight
-- The message expresses a universal truth or observation about life
-- The message would sound natural and profound as an aphorism
-- The conversion would add value rather than being forced or awkward
-
-Do NOT convert when:
-- The message is a question that needs a direct answer
-- The message is technical, factual, or informational
-- The message is a reaction, emoji, or very short response
-- The message is clearly casual conversation that wouldn't benefit from aphoristic style
-- The conversion would be forced, awkward, or inappropriate
-- The message contains specific names, dates, or concrete details that would lose meaning
-
-Be conservative - only return true if the conversion would genuinely enhance the message.`;
+Return true if the message is trivial/stupid and should be skipped.
+Return false if the message has substance and should be enhanced.`;
 
   const decision = await openai.chatStructured<{
-    shouldConvert: boolean;
+    isTrivial: boolean;
   }>({
     model: "gpt-5-mini",
     messages: [
@@ -42,31 +28,31 @@ Be conservative - only return true if the conversion would genuinely enhance the
       },
       {
         role: "user",
-        content: `Conversation context:\n${context}\n\nMessage to evaluate:\n${message}\n\nShould this message be converted to a Confucian-style aphorism?`,
+        content: `Message to evaluate:\n${message}\n\nIs this message trivial or stupid?`,
       },
     ],
     schema: {
       type: "object",
       properties: {
-        shouldConvert: {
+        isTrivial: {
           type: "boolean",
-          description:
-            "Whether the message should be converted to a Confucian-style aphorism",
+          description: "Whether the message is trivial or stupid",
         },
       },
-      required: ["shouldConvert"],
+      required: ["isTrivial"],
       additionalProperties: false,
     },
     schemaName: "aphorismConversionDecision",
-    schemaDescription: "Decision on whether to convert message to aphorism",
+    schemaDescription: "Decision on whether message is trivial",
   });
 
   return decision.match(
     (result) => {
-      if (result.shouldConvert) {
-        logger.debug({}, "Converting message to aphorism");
+      const shouldEnhance = !result.isTrivial;
+      if (shouldEnhance) {
+        logger.debug({}, "Enhancing message to aphorism");
       }
-      return result.shouldConvert;
+      return shouldEnhance;
     },
     (error) => {
       logger.warn({ err: error }, "Failed to check if should convert to aphorism");
@@ -77,11 +63,10 @@ Be conservative - only return true if the conversion would genuinely enhance the
 
 export async function convertToAphorism(
   message: string,
-  context: string,
   openai: OpenAIClient,
   logger: Logger,
 ): Promise<string | null> {
-  const systemMessage = `You are converting a message into the style of Confucian/classical Chinese aphorisms.
+  const systemMessage = `You are converting a user message into the style of Confucian/classical Chinese aphorisms.
 
 The style should:
 - Use concise, poetic language
@@ -108,7 +93,7 @@ Convert the message while preserving its essential meaning and intent.`;
       },
       {
         role: "user",
-        content: `Conversation context:\n${context}\n\nOriginal message:\n${message}\n\nConvert this message to a Confucian-style aphorism:`,
+        content: `Original message:\n${message}\n\nConvert this message to a Confucian-style aphorism:`,
       },
     ],
   });
