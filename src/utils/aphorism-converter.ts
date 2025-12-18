@@ -2,13 +2,29 @@ import type { Logger } from "pino";
 import type { OpenAIClient } from "../openai/client";
 
 const APHORISM_CONVERSION_PROBABILITY = 0.05;
+const APHORISM_CONVERSION_PROBABILITY_ALL_CAPS = 0.2;
+
+function isAllCaps(message: string): boolean {
+  const trimmedMessage = message.trim();
+  if (trimmedMessage.length === 0) {
+    return false;
+  }
+  const hasLetters = /[a-zA-Z]/.test(trimmedMessage);
+  if (!hasLetters) {
+    return false;
+  }
+  return trimmedMessage === trimmedMessage.toUpperCase() && trimmedMessage !== trimmedMessage.toLowerCase();
+}
 
 export async function shouldConvertToAphorism(
   message: string,
   openai: OpenAIClient,
   logger: Logger,
 ): Promise<boolean> {
-  if (Math.random() >= APHORISM_CONVERSION_PROBABILITY) {
+  const allCaps = isAllCaps(message);
+  const probability = allCaps ? APHORISM_CONVERSION_PROBABILITY_ALL_CAPS : APHORISM_CONVERSION_PROBABILITY;
+  
+  if (Math.random() >= probability) {
     return false;
   }
 
@@ -66,6 +82,8 @@ export async function convertToAphorism(
   openai: OpenAIClient,
   logger: Logger,
 ): Promise<string | null> {
+  const allCaps = isAllCaps(message);
+  
   const systemMessage = `You are converting a user message into the style of Confucian/classical Chinese aphorisms.
 
 The style should:
@@ -100,11 +118,12 @@ Convert the message while preserving its essential meaning and intent.`;
 
   return result.match(
     (convertedMessage) => {
+      const finalMessage = allCaps ? convertedMessage.toUpperCase() : convertedMessage;
       logger.info(
-        { original: message, converted: convertedMessage },
+        { original: message, converted: finalMessage },
         "Converted message to aphorism",
       );
-      return convertedMessage;
+      return finalMessage;
     },
     (error) => {
       logger.warn({ err: error }, "Failed to convert message to aphorism");
