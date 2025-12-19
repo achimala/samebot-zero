@@ -293,7 +293,14 @@ export class GifEmojiFeature implements Feature {
 
     this.emojiGenerator.deletePendingPreview(previewId);
 
-    await interaction.message.delete();
+    try {
+      await interaction.message.delete();
+    } catch (error) {
+      this.ctx.logger.warn(
+        { err: error, previewId },
+        "Failed to delete message on cancel",
+      );
+    }
   }
 
   private async fetchImageAsBase64(url: string): Promise<string | null> {
