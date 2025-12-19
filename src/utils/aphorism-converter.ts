@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import type { OpenAIClient } from "../openai/client";
 
-const APHORISM_CONVERSION_PROBABILITY = 0.05;
+const APHORISM_CONVERSION_PROBABILITY = 0.02;
 const APHORISM_CONVERSION_PROBABILITY_ALL_CAPS = 0.2;
 
 function isAllCaps(message: string): boolean {
