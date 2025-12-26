@@ -29,6 +29,7 @@ interface ScrapbookImageData {
   effectivePrompt: string;
   referenceImages: Array<{ data: string; mimeType: string }> | undefined;
   buffer: Buffer;
+  promptChain: string[];
 }
 
 export class ScrapbookFeature implements Feature {
@@ -205,6 +206,7 @@ export class ScrapbookFeature implements Feature {
               const channel = await this.ctx.discord.channels.fetch(channelId);
               if (channel && channel.isTextBased()) {
                 const message = await channel.messages.fetch(messageId);
+                const promptChain = [imagePromptResult.textPrompt];
                 await message.edit({
                   components: [this.createEditButtonRow(messageId)],
                 });
@@ -213,6 +215,7 @@ export class ScrapbookFeature implements Feature {
                   effectivePrompt: imagePromptResult.textPrompt,
                   referenceImages: imagePromptResult.referenceImages,
                   buffer,
+                  promptChain,
                 });
               }
             },
@@ -420,13 +423,14 @@ Note: Any reference images provided are used as references for generation, not a
     const result = await this.ctx.openai.generateImage(imageOptions);
     await result.match(
       async ({ buffer }) => {
+        const promptChain = [...imageData.promptChain, newPrompt];
         await message.edit({
           content: "",
           files: [
             {
               attachment: buffer,
               name: "scrapbook-memory.png",
-              description: newPrompt,
+              description: promptChain.join(" → "),
             },
           ],
           components: [this.createEditButtonRow(messageId)],
@@ -437,6 +441,7 @@ Note: Any reference images provided are used as references for generation, not a
           effectivePrompt,
           referenceImages,
           buffer,
+          promptChain,
         });
 
         await interaction.deleteReply();

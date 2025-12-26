@@ -19,6 +19,7 @@ interface ImageGenerationData {
   effectivePrompt: string;
   referenceImages: Array<{ data: string; mimeType: string }> | undefined;
   buffer: Buffer;
+  promptChain: string[];
 }
 
 export class ImageCommandFeature implements Feature {
@@ -74,12 +75,13 @@ export class ImageCommandFeature implements Feature {
     const result = await this.ctx.openai.generateImage(imageOptions);
     await result.match(
       async ({ buffer }) => {
+        const promptChain = [prompt];
         const message = await interaction.editReply({
           files: [
             {
               attachment: buffer,
               name: "samebot-image.png",
-              description: prompt,
+              description: promptChain.join(" → "),
             },
           ],
         });
@@ -94,6 +96,7 @@ export class ImageCommandFeature implements Feature {
           effectivePrompt,
           referenceImages,
           buffer,
+          promptChain,
         });
       },
       async (error) => {
@@ -213,13 +216,14 @@ export class ImageCommandFeature implements Feature {
     const result = await this.ctx.openai.generateImage(imageOptions);
     await result.match(
       async ({ buffer }) => {
+        const promptChain = [...imageData.promptChain, newPrompt];
         await message.edit({
           content: "",
           files: [
             {
               attachment: buffer,
               name: "samebot-image.png",
-              description: newPrompt,
+              description: promptChain.join(" → "),
             },
           ],
           components: [this.createEditButtonRow(messageId)],
@@ -230,6 +234,7 @@ export class ImageCommandFeature implements Feature {
           effectivePrompt,
           referenceImages,
           buffer,
+          promptChain,
         });
 
         await interaction.deleteReply();
