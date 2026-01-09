@@ -73,9 +73,19 @@ export class ImageOfDayFeature implements Feature {
         const context = this.ctx.conversation.getContext(
           this.ctx.config.imageOfDayChannelId,
         );
-        if (context && context.history.length > 2) {
-          conversationContext = `\n\nRecent conversation context (use this for inspiration or references):\n${this.ctx.conversation.formatContext(context)}`;
-          hasLittleConversation = false;
+        if (context) {
+          const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+          const recentHistory = context.history.filter(
+            (message) => message.timestamp >= twentyFourHoursAgo,
+          );
+          if (recentHistory.length > 2) {
+            const filteredContext = {
+              ...context,
+              history: recentHistory,
+            };
+            conversationContext = `\n\nRecent conversation context (use this for inspiration or references):\n${this.ctx.conversation.formatContext(filteredContext)}`;
+            hasLittleConversation = false;
+          }
         }
       }
 
