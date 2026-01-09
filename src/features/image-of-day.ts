@@ -68,14 +68,24 @@ export class ImageOfDayFeature implements Feature {
           : "";
 
       let conversationContext = "";
+      let hasLittleConversation = true;
       if (this.ctx.conversation) {
         const context = this.ctx.conversation.getContext(
           this.ctx.config.imageOfDayChannelId,
         );
-        if (context && context.history.length > 0) {
+        if (context && context.history.length > 2) {
           conversationContext = `\n\nRecent conversation context (use this for inspiration or references):\n${this.ctx.conversation.formatContext(context)}`;
+          hasLittleConversation = false;
         }
       }
+
+      const systemPrompt = hasLittleConversation
+        ? `Create a JSON object with 'prompt' and 'caption' for a fun, creative meme or story. Since there's little recent conversation, feel free to make up something entertaining and humorous - it could be a random funny scenario, a silly story, or an absurd meme. Be creative!${entityContext}`
+        : `Create a JSON object with 'prompt' and 'caption' for a humorous meme referencing the given date.${entityContext}${conversationContext}`;
+
+      const userPrompt = hasLittleConversation
+        ? `Date: ${today}. Create something fun and entertaining - make up your own funny meme or story! Keep caption under 120 characters.`
+        : `Date: ${today}. Keep caption under 120 characters.`;
 
       const ideation = await this.ctx.openai.chatStructured<
         z.infer<typeof PromptResponseSchema>
@@ -83,11 +93,11 @@ export class ImageOfDayFeature implements Feature {
         messages: [
           {
             role: "system",
-            content: `Create a JSON object with 'prompt' and 'caption' for a humorous meme referencing the given date.${entityContext}${conversationContext}`,
+            content: systemPrompt,
           },
           {
             role: "user",
-            content: `Date: ${today}. Keep caption under 120 characters.`,
+            content: userPrompt,
           },
         ],
         schema: promptResponseJsonSchema,
