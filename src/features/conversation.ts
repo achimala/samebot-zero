@@ -17,7 +17,6 @@ import {
 
 const AUTO_REACT_PROBABILITY = 0.15;
 const SAY_SAME_PROBABILITY = 0.2;
-const STARTUP_MESSAGE_SUPPRESSION_MS = 10 * 60 * 1000;
 
 interface ConversationState {
   history: AgentMessage[];
@@ -407,22 +406,6 @@ export class ConversationFeature implements Feature {
         !mostRecentMessage ||
         mostRecentMessage.createdTimestamp < oneDayAgo
       ) {
-        return;
-      }
-
-      const recentStartupMessage = messages.find(
-        (msg) =>
-          msg.author.id === this.botUserId &&
-          msg.content
-            .toLowerCase()
-            .includes("samebot restarted successfully") &&
-          Date.now() - msg.createdTimestamp < STARTUP_MESSAGE_SUPPRESSION_MS,
-      );
-      if (recentStartupMessage) {
-        this.ctx.logger.info(
-          { messageId: recentStartupMessage.id },
-          "Skipping startup message because one was recently posted",
-        );
         return;
       }
 
