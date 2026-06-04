@@ -34,9 +34,8 @@ const honcho = new Honcho({
 });
 
 const db = new pg.Client({
-  connectionString: env.SUPABASE_DB_CONNECTION_URI.replace(
-    "postgresql+psycopg://",
-    "postgresql://",
+  connectionString: toNodePostgresConnectionString(
+    env.SUPABASE_DB_CONNECTION_URI,
   ),
 });
 
@@ -151,3 +150,16 @@ await db.query("drop table if exists public.memories");
 await db.end();
 
 console.log(`Imported ${rows.length} legacy memories to Honcho and dropped legacy storage.`);
+
+function toNodePostgresConnectionString(connectionUri: string): string {
+  const url = new URL(
+    connectionUri.replace("postgresql+psycopg://", "postgresql://"),
+  );
+  if (
+    url.searchParams.get("sslmode") === "require" &&
+    !url.searchParams.has("uselibpqcompat")
+  ) {
+    url.searchParams.set("uselibpqcompat", "true");
+  }
+  return url.toString();
+}

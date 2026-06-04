@@ -82,7 +82,8 @@ const honchoEnv = new Map<string, string>([
 const apiService = await ensureRenderService({
   name: env.HONCHO_API_SERVICE_NAME,
   type: "private_service",
-  startCommand: "sh docker/entrypoint.sh",
+  dockerCommand: "sh docker/entrypoint.sh",
+  preDeployCommand: "/app/.venv/bin/python scripts/provision_db.py",
   envVars: honchoEnv,
 });
 await putServiceEnv(apiService.id, honchoEnv);
@@ -90,13 +91,13 @@ await putServiceEnv(apiService.id, honchoEnv);
 const deriverService = await ensureRenderService({
   name: env.HONCHO_DERIVER_SERVICE_NAME,
   type: "background_worker",
-  startCommand: "/app/.venv/bin/python -m src.deriver",
+  dockerCommand: "/app/.venv/bin/python -m src.deriver",
   envVars: honchoEnv,
 });
 await putServiceEnv(deriverService.id, honchoEnv);
 
 const honchoUrl =
-  env.HONCHO_INTERNAL_URL ?? `http://${apiService.slug}:8000`;
+  env.HONCHO_INTERNAL_URL ?? `http://${apiService.slug}:10000`;
 samebotEnv.set("HONCHO_URL", honchoUrl);
 samebotEnv.set("HONCHO_API_KEY", honchoApiKey);
 samebotEnv.set("HONCHO_WORKSPACE_ID", env.HONCHO_WORKSPACE_ID);
@@ -134,7 +135,8 @@ console.log(
 async function ensureRenderService(options: {
   name: string;
   type: "private_service" | "background_worker";
-  startCommand: string;
+  dockerCommand: string;
+  preDeployCommand?: string;
   healthCheckPath?: string;
   envVars: EnvMap;
 }): Promise<RenderService> {
@@ -150,8 +152,6 @@ async function ensureRenderService(options: {
       env.HONCHO_BRANCH,
       "--runtime",
       "docker",
-      "--start-command",
-      options.startCommand,
       "--plan",
       env.RENDER_PLAN,
       "--confirm",
@@ -162,6 +162,7 @@ async function ensureRenderService(options: {
       updateArgs.push("--health-check-path", options.healthCheckPath);
     }
     run("render", updateArgs);
+    await configureDockerService(existing.id, options);
     return getRenderServiceByName(options.name) ?? existing;
   }
 
@@ -184,8 +185,6 @@ async function ensureRenderService(options: {
     env.RENDER_REGION,
     "--plan",
     env.RENDER_PLAN,
-    "--start-command",
-    options.startCommand,
     "--confirm",
     "--output",
     "json",
@@ -202,7 +201,34 @@ async function ensureRenderService(options: {
   if (!service) {
     throw new Error(`Render service ${options.name} was not created.`);
   }
+  await configureDockerService(service.id, options);
   return service;
+}
+
+async function configureDockerService(
+  serviceId: string,
+  options: {
+    dockerCommand: string;
+    preDeployCommand?: string;
+  },
+): Promise<void> {
+  await renderApi(`/services/${serviceId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      repo: env.HONCHO_REPO,
+      branch: env.HONCHO_BRANCH,
+      serviceDetails: {
+        runtime: "docker",
+        plan: env.RENDER_PLAN,
+        preDeployCommand: options.preDeployCommand ?? "",
+        envSpecificDetails: {
+          dockerCommand: options.dockerCommand,
+          dockerContext: ".",
+          dockerfilePath: "./Dockerfile",
+        },
+      },
+    }),
+  });
 }
 
 function getRenderServiceByName(name: string): RenderService | undefined {
