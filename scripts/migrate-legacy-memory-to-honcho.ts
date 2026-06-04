@@ -1,14 +1,13 @@
 import "@total-typescript/ts-reset";
 import { Honcho } from "@honcho-ai/sdk";
-import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+import pg from "pg";
 import { z } from "zod";
 
 dotenv.config();
 
 const EnvSchema = z.object({
-  SUPABASE_URL: z.string().min(1),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  SUPABASE_DB_CONNECTION_URI: z.string().min(1),
   HONCHO_URL: z.string().url(),
   HONCHO_API_KEY: z.string().min(1),
   HONCHO_WORKSPACE_ID: z.string().min(1),
@@ -27,11 +26,6 @@ const CONCLUSION_BATCH_SIZE = 50;
 
 const env = EnvSchema.parse(process.env);
 
-const supabase = createClient(
-  env.SUPABASE_URL,
-  env.SUPABASE_SERVICE_ROLE_KEY,
-);
-
 const honcho = new Honcho({
   apiKey: env.HONCHO_API_KEY,
   workspaceId: env.HONCHO_WORKSPACE_ID,
@@ -39,20 +33,28 @@ const honcho = new Honcho({
   environment: "production",
 });
 
-const { data, error } = await supabase
-  .from("memories")
-  .select("id, content, created_at")
-  .order("created_at", { ascending: true });
+const db = new pg.Client({
+  connectionString: env.SUPABASE_DB_CONNECTION_URI.replace(
+    "postgresql+psycopg://",
+    "postgresql://",
+  ),
+});
 
-if (error) {
-  throw error;
-}
+await db.connect();
 
-const rows = data as LegacyMemoryRow[];
-if (rows.length === 0) {
-  console.log("No legacy memories to import.");
+const legacyTableResult = await db.query<{ exists: boolean }>(
+  "select to_regclass('public.memories') is not null as exists",
+);
+if (!legacyTableResult.rows[0]?.exists) {
+  await db.end();
+  console.log("Legacy memory storage is already absent.");
   process.exit(0);
 }
+
+const legacyMemoryResult = await db.query<LegacyMemoryRow>(
+  "select id::text, content, created_at::text from public.memories order by created_at asc",
+);
+const rows = legacyMemoryResult.rows;
 
 const assistant = await honcho.peer(env.HONCHO_ASSISTANT_PEER_ID, {
   metadata: {
@@ -76,70 +78,76 @@ const legacyPeer = await honcho.peer(LEGACY_PEER_ID, {
   },
 });
 
-const session = await honcho.session(LEGACY_SESSION_ID, {
-  metadata: {
-    source: "samebot-zero",
-    import: "legacy-memories",
-  },
-  configuration: {
-    reasoning: {
-      enabled: false,
+if (rows.length > 0) {
+  const session = await honcho.session(LEGACY_SESSION_ID, {
+    metadata: {
+      source: "samebot-zero",
+      import: "legacy-memories",
     },
-    peerCard: {
-      use: true,
-      create: true,
-    },
-    summary: {
-      enabled: false,
-    },
-    dream: {
-      enabled: true,
-    },
-  },
-  peers: [
-    [
-      assistant.id,
-      {
-        observeMe: true,
-        observeOthers: true,
+    configuration: {
+      reasoning: {
+        enabled: false,
       },
-    ],
-    [
-      legacyPeer.id,
-      {
-        observeMe: true,
-        observeOthers: true,
+      peerCard: {
+        use: true,
+        create: true,
       },
-    ],
-  ],
-});
-
-await session.addMessages(
-  rows.map((row) =>
-    legacyPeer.message(row.content, {
-      createdAt: row.created_at,
-      metadata: {
-        source: "samebot-zero",
-        import: "legacy-memories",
-        legacyMemoryId: row.id,
+      summary: {
+        enabled: false,
       },
-      configuration: {
-        reasoning: {
-          enabled: false,
+      dream: {
+        enabled: true,
+      },
+    },
+    peers: [
+      [
+        assistant.id,
+        {
+          observeMe: true,
+          observeOthers: true,
         },
-      },
-    }),
-  ),
-);
+      ],
+      [
+        legacyPeer.id,
+        {
+          observeMe: true,
+          observeOthers: true,
+        },
+      ],
+    ],
+  });
 
-for (let index = 0; index < rows.length; index += CONCLUSION_BATCH_SIZE) {
-  const batch = rows.slice(index, index + CONCLUSION_BATCH_SIZE);
-  await assistant.conclusionsOf(legacyPeer).create(
-    batch.map((row) => ({
-      content: row.content,
-      sessionId: session.id,
-    })),
+  await session.addMessages(
+    rows.map((row) =>
+      legacyPeer.message(row.content, {
+        createdAt: row.created_at,
+        metadata: {
+          source: "samebot-zero",
+          import: "legacy-memories",
+          legacyMemoryId: row.id,
+        },
+        configuration: {
+          reasoning: {
+            enabled: false,
+          },
+        },
+      }),
+    ),
   );
+
+  for (let index = 0; index < rows.length; index += CONCLUSION_BATCH_SIZE) {
+    const batch = rows.slice(index, index + CONCLUSION_BATCH_SIZE);
+    await assistant.conclusionsOf(legacyPeer).create(
+      batch.map((row) => ({
+        content: row.content,
+        sessionId: session.id,
+      })),
+    );
+  }
 }
 
-console.log(`Imported ${rows.length} legacy memories to Honcho.`);
+await db.query("drop function if exists public.match_memories(vector, int)");
+await db.query("drop table if exists public.memories");
+await db.end();
+
+console.log(`Imported ${rows.length} legacy memories to Honcho and dropped legacy storage.`);

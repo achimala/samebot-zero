@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest",
+    "deploy:honcho-render": "tsx scripts/deploy-honcho-render.ts",
     "migrate:honcho-memory": "tsx scripts/migrate-legacy-memory-to-honcho.ts"
   },
   "keywords": [],
@@ -28,6 +29,7 @@
     "luxon": "^3.7.2",
     "neverthrow": "^8.2.0",
     "openai": "^6.42.0",
+    "pg": "^8.21.0",
     "pino": "^10.1.0",
     "sharp": "^0.34.5",
     "zod": "^4.1.12"
@@ -37,6 +39,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/luxon": "^3.7.1",
     "@types/node": "^24.10.1",
+    "@types/pg": "^8.20.0",
     "@typescript-eslint/eslint-plugin": "^8.47.0",
     "@typescript-eslint/parser": "^8.47.0",
     "better-sqlite3": "^11.10.0",
