@@ -17,15 +17,12 @@ import {
 
 const AUTO_REACT_PROBABILITY = 0.15;
 const SAY_SAME_PROBABILITY = 0.2;
-const MEMORY_EXTRACTION_INTERVAL = 6;
 
 interface ConversationState {
   history: AgentMessage[];
   isDm: boolean;
   channelId: string;
   lastResponseAt?: number;
-  messagesSinceLastExtraction: number;
-  lastExtractedTimestamp: number;
 }
 
 export class ConversationFeature implements Feature {
@@ -165,8 +162,6 @@ export class ConversationFeature implements Feature {
       history: [],
       isDm,
       channelId: key,
-      messagesSinceLastExtraction: 0,
-      lastExtractedTimestamp: 0,
     };
     context.isDm = isDm;
 
@@ -183,10 +178,10 @@ export class ConversationFeature implements Feature {
       message,
       this.botUserId,
     );
-    
+
     let userMessageContent = incomingMessage.content || "";
     let aphorismReply: string | null = null;
-    
+
     if (userMessageContent.length > 0) {
       const shouldConvert = await shouldConvertToAphorism(
         userMessageContent,
@@ -214,29 +209,11 @@ export class ConversationFeature implements Feature {
     context.history.push(agentMessage);
     context.history = context.history.slice(-50);
     this.contexts.set(key, context);
-
-    const isMainChannel = message.channelId === this.ctx.config.mainChannelId;
-    if (isMainChannel) {
-      context.messagesSinceLastExtraction++;
-      if (context.messagesSinceLastExtraction >= MEMORY_EXTRACTION_INTERVAL) {
-        const newMessages = context.history.filter(
-          (m) =>
-            m.timestamp > context.lastExtractedTimestamp && m.role === "user",
-        );
-        if (newMessages.length > 0) {
-          const batchContext = newMessages
-            .map((m) => (m.author ? `${m.author}: ${m.content}` : m.content))
-            .join("\n");
-          context.lastExtractedTimestamp = Date.now();
-          context.messagesSinceLastExtraction = 0;
-          this.contexts.set(key, context);
-
-          void this.ctx.memory.extractFromBatch(batchContext).catch((error) => {
-            this.ctx.logger.error({ err: error }, "Failed to extract memories");
-          });
-        }
-      }
-    }
+    await this.ctx.memory.syncMessage({
+      message: agentMessage,
+      channelId: key,
+      isDm,
+    });
 
     if (aphorismReply) {
       await this.adapter.sendTyping(message.channelId);
@@ -245,11 +222,17 @@ export class ConversationFeature implements Feature {
         aphorismReply,
       );
       if (sendResult.messageId) {
-        context.history.push({
+        const assistantMessage: AgentMessage = {
           id: sendResult.messageId,
           role: "assistant",
           content: aphorismReply,
           timestamp: Date.now(),
+        };
+        context.history.push(assistantMessage);
+        await this.ctx.memory.syncMessage({
+          message: assistantMessage,
+          channelId: key,
+          isDm,
         });
       }
       context.history = context.history.slice(-50);
@@ -300,11 +283,17 @@ export class ConversationFeature implements Feature {
         response.text,
       );
       if (sendResult.messageId) {
-        context.history.push({
+        const assistantMessage: AgentMessage = {
           id: sendResult.messageId,
           role: "assistant",
           content: response.text,
           timestamp: Date.now(),
+        };
+        context.history.push(assistantMessage);
+        await this.ctx.memory.syncMessage({
+          message: assistantMessage,
+          channelId: key,
+          isDm,
         });
       }
     }
@@ -359,6 +348,10 @@ export class ConversationFeature implements Feature {
         context.history.push(...newMessages);
         context.history.sort((a, b) => a.timestamp - b.timestamp);
         context.history = context.history.slice(-50);
+        await this.ctx.memory.syncMessages(
+          this.toAgentContext(context),
+          newMessages,
+        );
       }
     } catch (error) {
       this.ctx.logger.error(
@@ -373,6 +366,7 @@ export class ConversationFeature implements Feature {
       id: incoming.id,
       role: "user",
       content: incoming.content,
+      authorId: incoming.authorId,
       author: incoming.authorName,
       timestamp: incoming.timestamp,
     };
@@ -417,8 +411,6 @@ export class ConversationFeature implements Feature {
         history: [],
         isDm: false,
         channelId: mainChannelId,
-        messagesSinceLastExtraction: 0,
-        lastExtractedTimestamp: 0,
       };
 
       const existingMessageIds = new Set(context.history.map((msg) => msg.id));
@@ -454,6 +446,10 @@ export class ConversationFeature implements Feature {
         context.history.sort((a, b) => a.timestamp - b.timestamp);
         context.history = context.history.slice(-50);
         this.contexts.set(key, context);
+        await this.ctx.memory.syncMessages(
+          this.toAgentContext(context),
+          newMessages,
+        );
 
         const agentContext = this.toAgentContext(context);
         const startupResponse = await this.agent.chatWithContext(agentContext, {

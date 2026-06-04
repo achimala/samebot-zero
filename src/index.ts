@@ -18,8 +18,7 @@ import { GifCommandFeature } from "./features/gif-command";
 import { RobotEmojiReactFeature } from "./features/robot-emoji-react";
 import { RememberImageFeature } from "./features/remember-image";
 import { ScrapbookFeature } from "./features/scrapbook";
-import { SupabaseMemoryStore } from "./memory/supabase-store";
-import { MemoryService } from "./memory/service";
+import { HonchoMemoryService } from "./memory/service";
 import { SupabaseScrapbookStore } from "./scrapbook/supabase-store";
 import { ScrapbookService } from "./scrapbook/service";
 
@@ -31,8 +30,7 @@ async function main() {
   const openai = new OpenAIClient(config, logger);
   const supabase = new SupabaseClient(config, logger);
 
-  const memoryStore = new SupabaseMemoryStore(supabase.getClient(), logger);
-  const memoryService = new MemoryService(memoryStore, openai, logger);
+  const memoryService = new HonchoMemoryService(config, logger);
 
   const scrapbookStore = new SupabaseScrapbookStore(
     supabase.getClient(),

@@ -8,7 +8,7 @@ import type {
   ToolMessage,
   OpenAIClient,
 } from "../openai/client";
-import type { MemoryService } from "../memory/service";
+import type { HonchoMemoryService } from "../memory/service";
 import type { ScrapbookService } from "../scrapbook/service";
 import type { SupabaseClient } from "../supabase/client";
 import type { EntityResolver } from "../utils/entity-resolver";
@@ -174,7 +174,7 @@ interface ToolExecutionContext {
 export class Agent {
   constructor(
     private readonly openai: OpenAIClient,
-    private readonly memory: MemoryService,
+    private readonly memory: HonchoMemoryService,
     private readonly scrapbook: ScrapbookService,
     private readonly entityResolver: EntityResolver,
     private readonly supabase: SupabaseClient,
@@ -509,13 +509,13 @@ If appropriate, provide a brief response (1-3 words max). Examples: "same", "sam
         ? `\n\nWhen generating images, you can feature these people/entities (we have reference images for them): ${availableEntities.join(", ")}. Include them by name in your image prompt to use their likeness. Note: These reference images are used as references for generation, not as images to be directly pasted into the output.`
         : "";
 
-    const relevantMemories = await this.memory.getRelevantMemories(
+    const honchoMemoryContext = await this.memory.getPromptContext(
+      context,
       contextWithIds.text,
-      10,
     );
     const memoryContext =
-      relevantMemories.length > 0
-        ? `\n\nThings you remember about the people in this conversation:\n${relevantMemories.map((m) => `- ${m.content}`).join("\n")}`
+      honchoMemoryContext.length > 0
+        ? `\n\nHoncho memory context:\n${honchoMemoryContext}`
         : "";
 
     const systemMessage = `${PERSONA}\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.
@@ -763,10 +763,14 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
 
       case "search_memory": {
         const query = toolCall.arguments.query as string;
-        const searchResults = await this.memory.searchMemories(query, 10);
+        const searchResults = await this.memory.searchMemories(
+          query,
+          10,
+          agentContext,
+        );
         if (searchResults.length > 0) {
           const memoryResultsText = searchResults
-            .map((m) => `- ${m.content}`)
+            .map((result) => `- ${result.content}`)
             .join("\n");
           return `Found memories:\n${memoryResultsText}`;
         }

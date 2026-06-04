@@ -4,6 +4,7 @@ export interface AgentMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  authorId?: string;
   author?: string;
   timestamp: number;
   images?: string[];

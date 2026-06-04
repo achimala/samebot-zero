@@ -1,368 +1,420 @@
+import {
+  Honcho,
+  type Peer,
+  type Session,
+  type PeerContext,
+} from "@honcho-ai/sdk";
 import type { Logger } from "pino";
-import { ResultAsync } from "neverthrow";
-import type { Memory, MemoryStore } from "./store";
-import type { OpenAIClient } from "../openai/client";
+import type { AppConfig } from "../core/config";
+import type { AgentContext, AgentMessage } from "../agent/types";
 
-const DECAY_RATE = 0.1;
-const PURGE_THRESHOLD = 0.05;
-const REINFORCEMENT_BOOST = 0.3;
-const CONTRADICTION_PENALTY = 0.5;
+const CONTEXT_SEARCH_TOP_K = 10;
+const CONTEXT_MAX_CONCLUSIONS = 24;
+const MAX_RELATIONSHIP_CONTEXTS = 24;
+const GLOBAL_SEARCH_PEER_LIMIT = 100;
 
-interface MemoryAnalysis {
-  reinforces: string[];
-  contradicts: string[];
-  isNew: boolean;
-}
-
-interface ExtractedFact {
+export interface HonchoSearchResult {
   content: string;
+  source: "conclusion" | "message";
+  peerId?: string;
+  peerName?: string;
+  createdAt?: string;
 }
 
-function computeEffectiveStrength(memory: Memory): number {
-  const now = new Date();
-  const daysSinceLastSeen =
-    (now.getTime() - memory.lastSeenAt.getTime()) / (1000 * 60 * 60 * 24);
-  return memory.strength * Math.exp(-DECAY_RATE * daysSinceLastSeen);
+interface Participant {
+  peerId: string;
+  displayName: string;
+  discordUserId: string;
 }
 
-export class MemoryService {
+interface SyncMessageInput {
+  message: AgentMessage;
+  channelId: string;
+  isDm: boolean;
+}
+
+export class HonchoMemoryService {
+  private readonly honcho: Honcho;
+  private readonly peerCache = new Map<string, Promise<Peer>>();
+  private readonly sessionCache = new Map<string, Promise<Session>>();
+
   constructor(
-    private readonly store: MemoryStore,
-    private readonly openai: OpenAIClient,
+    private readonly config: AppConfig,
     private readonly logger: Logger,
-  ) {}
+  ) {
+    this.honcho = new Honcho({
+      apiKey: config.honchoApiKey,
+      workspaceId: config.honchoWorkspaceId,
+      baseURL: config.honchoUrl,
+      environment: "production",
+    });
+  }
 
-  async extractFromBatch(conversationBatch: string): Promise<void> {
-    const systemMessage = `You extract factual observations and hypotheses about people from conversations.
+  async syncMessage(input: SyncMessageInput): Promise<void> {
+    const session = await this.getSession(input.channelId, input.isDm);
+    const peer = await this.getMessagePeer(input.message);
 
-Focus on:
-- Personal facts (interests, preferences, job, location, relationships)
-- Behavioral patterns (how someone typically acts or responds)
-- Opinions and beliefs they've expressed
-- Relationships between people
-- Significant events or experiences mentioned
-
-Format each fact as a standalone statement that would make sense without the original conversation context.
-Include the person's name in each fact for clarity.
-Only extract meaningful, memorable facts that have long-term relevance - skip trivial statements or ones that only apply to the current conversation.
-If nothing memorable is said, return an empty array. Be conservative, it's perfectly OK to return an empty array if there's nothing meaningful.
-
-Do not just restate what people said or did. Extract meaningful facts about their interests, personality, significant events, etc.
-Ensure each fact is fully self-contained and includes all relevant context so it stands alone.
-
-It is not useful to track things like "Anshu said 'hello'" or "Anshu asked Samebot to search for Apple's stock price"
-It *is* useful to track things like "Anshu likes to play video games" or "Anshu is a software engineer at Apple"
-If you cannot extract any information like those latter examples, just return an empty array, don't try to force it.
-`;
-
-    const result = await this.openai.chatStructured<{ facts: ExtractedFact[] }>(
-      {
-        messages: [
-          { role: "system", content: systemMessage },
-          {
-            role: "user",
-            content: `Extract facts from this conversation:\n\n${conversationBatch}`,
-          },
-        ],
-        schema: {
-          type: "object",
-          properties: {
-            facts: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  content: {
-                    type: "string",
-                    description: "The factual statement or hypothesis",
-                  },
-                },
-                required: ["content"],
-                additionalProperties: false,
-              },
-            },
-          },
-          required: ["facts"],
-          additionalProperties: false,
+    await session.addPeers([
+      [
+        this.config.honchoAssistantPeerId,
+        {
+          observeMe: true,
+          observeOthers: true,
         },
-        schemaName: "extractedFacts",
-        model: "gpt-5.5",
-      },
-    );
-
-    if (!result.isOk()) {
-      this.logger.error({ err: result.error }, "Failed to extract facts");
-      return;
-    }
-
-    const facts = result.value.facts;
-    if (facts.length === 0) {
-      return;
-    }
-
-    for (const fact of facts) {
-      await this.processObservation(fact.content);
-    }
-
-    await this.purgeStaleMemories();
-  }
-
-  private async processObservation(observation: string): Promise<void> {
-    const embeddingResult = await this.openai.generateEmbedding(observation);
-
-    if (!embeddingResult.isOk()) {
-      this.logger.error(
-        { err: embeddingResult.error },
-        "Failed to generate embedding for observation",
-      );
-      return;
-    }
-
-    const embedding = embeddingResult.value;
-
-    const findResult = await ResultAsync.fromPromise(
-      this.store.findSimilar(embedding, 10),
-      (error) => error,
-    );
-
-    if (findResult.isErr()) {
-      this.logger.error(
-        { err: findResult.error },
-        "Failed to find similar memories",
-      );
-      return;
-    }
-
-    const similarMemories = findResult.value;
-
-    if (similarMemories.length === 0) {
-      await this.createMemory(observation, embedding);
-      return;
-    }
-
-    const analysis = await this.analyzeMemoryRelations(
-      observation,
-      similarMemories.map((m) => ({ id: m.id, content: m.content })),
-    );
-
-    for (const memoryId of analysis.reinforces) {
-      await this.reinforceMemory(memoryId);
-    }
-
-    for (const memoryId of analysis.contradicts) {
-      await this.weakenMemory(memoryId);
-    }
-
-    if (analysis.isNew) {
-      await this.createMemory(observation, embedding);
-    }
-  }
-
-  private async analyzeMemoryRelations(
-    newObservation: string,
-    candidates: Array<{ id: string; content: string }>,
-  ): Promise<MemoryAnalysis> {
-    const systemMessage = `You are analyzing how a new observation relates to existing memories.
-
-Given a new observation and a list of existing memories, determine:
-1. Which existing memories are REINFORCED by this observation (the new info supports or confirms them)
-2. Which existing memories are CONTRADICTED by this observation (the new info conflicts with them)
-3. Whether this observation contains NEW information not covered by any existing memory
-
-Be conservative - only mark memories as reinforced if the new observation clearly supports them.
-Only mark memories as contradicted if there's a genuine conflict.
-You can return empty arrays as needed if there's no information to reinforce or contradict any existing memories.
-`;
-
-    const candidateList = candidates
-      .map((c) => `- [${c.id}]: ${c.content}`)
-      .join("\n");
-
-    const userMessage = `New observation: "${newObservation}"
-
-Existing memories:
-${candidateList}
-
-Analyze how the new observation relates to these memories.`;
-
-    const result = await this.openai.chatStructured<MemoryAnalysis>({
-      messages: [
-        { role: "system", content: systemMessage },
-        { role: "user", content: userMessage },
       ],
-      schema: {
-        type: "object",
-        properties: {
-          reinforces: {
-            type: "array",
-            items: { type: "string" },
-            description: "Array of memory IDs that this observation reinforces",
-          },
-          contradicts: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Array of memory IDs that this observation contradicts",
-          },
-          isNew: {
-            type: "boolean",
-            description:
-              "Whether this contains new information not in existing memories",
-          },
+      [
+        peer.id,
+        {
+          observeMe: true,
+          observeOthers: true,
         },
-        required: ["reinforces", "contradicts", "isNew"],
-        additionalProperties: false,
+      ],
+    ]);
+
+    const existing = await session.messages({
+      filters: {
+        metadata: {
+          discordMessageId: input.message.id,
+        },
       },
-      schemaName: "memoryAnalysis",
-      model: "gpt-5.4-mini",
+      size: 1,
     });
-
-    if (result.isOk()) {
-      return result.value;
+    if (existing.length > 0) {
+      return;
     }
-    this.logger.error(
-      { err: result.error },
-      "Failed to analyze memory relations",
+
+    const content = this.buildMessageContent(input.message);
+    await session.addMessages(
+      peer.message(content, {
+        createdAt: new Date(input.message.timestamp),
+        metadata: {
+          source: "samebot-zero",
+          discordMessageId: input.message.id,
+          discordChannelId: input.channelId,
+          discordRole: input.message.role,
+          discordAuthorId:
+            input.message.role === "assistant"
+              ? this.config.honchoAssistantPeerId
+              : input.message.authorId,
+          discordAuthorName:
+            input.message.role === "assistant"
+              ? "samebot"
+              : input.message.author,
+          isDm: input.isDm,
+          imageCount: input.message.images?.length ?? 0,
+        },
+      }),
     );
-    return { reinforces: [], contradicts: [], isNew: true };
   }
 
-  private async createMemory(
-    content: string,
-    embedding: number[],
+  async syncMessages(
+    context: AgentContext,
+    messages: AgentMessage[],
   ): Promise<void> {
-    const now = new Date();
-    await this.store.insert({
-      content,
-      embedding,
-      strength: 1.0,
-      lastSeenAt: now,
-      createdAt: now,
-    });
-    this.logger.info({ content }, "Created new memory");
+    for (const message of messages) {
+      await this.syncMessage({
+        message,
+        channelId: context.channelId,
+        isDm: context.isDm,
+      });
+    }
   }
 
-  private async reinforceMemory(memoryId: string): Promise<void> {
-    const memories = await this.store.getAll();
-    const memory = memories.find((m) => m.id === memoryId);
-    if (!memory) {
-      return;
+  async getPromptContext(
+    context: AgentContext,
+    searchQuery: string,
+  ): Promise<string> {
+    const session = await this.getSession(context.channelId, context.isDm);
+    const assistant = await this.getAssistantPeer();
+    const participants = this.getParticipants(context);
+    const sections: string[] = [];
+
+    const summaries = await session.summaries();
+    if (summaries.longSummary) {
+      sections.push(`Session summary:\n${summaries.longSummary.content}`);
+    } else if (summaries.shortSummary) {
+      sections.push(`Session summary:\n${summaries.shortSummary.content}`);
     }
 
-    const newStrength = Math.min(memory.strength + REINFORCEMENT_BOOST, 5.0);
-    await this.store.update(memoryId, {
-      strength: newStrength,
-      lastSeenAt: new Date(),
-    });
-    this.logger.info(
-      { memoryId, oldStrength: memory.strength, newStrength },
-      "Reinforced memory",
-    );
-  }
-
-  private async weakenMemory(memoryId: string): Promise<void> {
-    const memories = await this.store.getAll();
-    const memory = memories.find((m) => m.id === memoryId);
-    if (!memory) {
-      return;
-    }
-
-    const newStrength = memory.strength * (1 - CONTRADICTION_PENALTY);
-    await this.store.update(memoryId, { strength: newStrength });
-    this.logger.info(
-      { memoryId, oldStrength: memory.strength, newStrength },
-      "Weakened memory due to contradiction",
-    );
-  }
-
-  async getRelevantMemories(
-    conversationText: string,
-    topK: number,
-  ): Promise<Memory[]> {
-    const embeddingResult =
-      await this.openai.generateEmbedding(conversationText);
-
-    if (!embeddingResult.isOk()) {
-      this.logger.error(
-        { err: embeddingResult.error },
-        "Failed to generate embedding for memory retrieval",
+    for (const participant of participants) {
+      const peer = await this.getDiscordPeer(participant);
+      const peerContext = await assistant.context({
+        target: peer,
+        searchQuery,
+        searchTopK: CONTEXT_SEARCH_TOP_K,
+        includeMostFrequent: true,
+        maxConclusions: CONTEXT_MAX_CONCLUSIONS,
+      });
+      const formatted = this.formatPeerContext(
+        `Samebot's model of ${participant.displayName}`,
+        peerContext,
       );
-      return [];
-    }
-
-    const findResult = await ResultAsync.fromPromise(
-      this.store.findSimilar(embeddingResult.value, topK * 2),
-      (error) => error,
-    );
-
-    if (findResult.isErr()) {
-      this.logger.error(
-        { err: findResult.error },
-        "Failed to find similar memories",
-      );
-      return [];
-    }
-
-    const memoriesWithEffectiveStrength = findResult.value.map((memory) => ({
-      memory,
-      effectiveStrength: computeEffectiveStrength(memory),
-    }));
-
-    memoriesWithEffectiveStrength.sort(
-      (a, b) => b.effectiveStrength - a.effectiveStrength,
-    );
-
-    return memoriesWithEffectiveStrength
-      .slice(0, topK)
-      .filter((item) => item.effectiveStrength >= PURGE_THRESHOLD)
-      .map((item) => item.memory);
-  }
-
-  async searchMemories(query: string, topK: number): Promise<Memory[]> {
-    const embeddingResult = await this.openai.generateEmbedding(query);
-
-    if (!embeddingResult.isOk()) {
-      this.logger.error(
-        { err: embeddingResult.error },
-        "Failed to generate embedding for memory search",
-      );
-      return [];
-    }
-
-    const findResult = await ResultAsync.fromPromise(
-      this.store.findSimilar(embeddingResult.value, topK),
-      (error) => error,
-    );
-
-    if (findResult.isErr()) {
-      this.logger.error(
-        { err: findResult.error },
-        "Failed to find similar memories",
-      );
-      return [];
-    }
-
-    return findResult.value.filter(
-      (memory) => computeEffectiveStrength(memory) >= PURGE_THRESHOLD,
-    );
-  }
-
-  async purgeStaleMemories(): Promise<number> {
-    const allMemories = await this.store.getAll();
-    let purgedCount = 0;
-
-    for (const memory of allMemories) {
-      const effectiveStrength = computeEffectiveStrength(memory);
-      if (effectiveStrength < PURGE_THRESHOLD) {
-        await this.store.delete(memory.id);
-        this.logger.info(
-          { memoryId: memory.id, content: memory.content, effectiveStrength },
-          "Purged stale memory",
-        );
-        purgedCount++;
+      if (formatted) {
+        sections.push(formatted);
       }
     }
 
-    return purgedCount;
+    let relationshipContexts = 0;
+    for (const observer of participants) {
+      for (const observed of participants) {
+        if (observer.peerId === observed.peerId) {
+          continue;
+        }
+        if (relationshipContexts >= MAX_RELATIONSHIP_CONTEXTS) {
+          break;
+        }
+
+        const observerPeer = await this.getDiscordPeer(observer);
+        const observedPeer = await this.getDiscordPeer(observed);
+        const peerContext = await observerPeer.context({
+          target: observedPeer,
+          searchQuery,
+          searchTopK: CONTEXT_SEARCH_TOP_K,
+          includeMostFrequent: true,
+          maxConclusions: CONTEXT_MAX_CONCLUSIONS,
+        });
+        const formatted = this.formatPeerContext(
+          `${observer.displayName}'s model of ${observed.displayName}`,
+          peerContext,
+        );
+        if (formatted) {
+          sections.push(formatted);
+          relationshipContexts++;
+        }
+      }
+      if (relationshipContexts >= MAX_RELATIONSHIP_CONTEXTS) {
+        break;
+      }
+    }
+
+    return sections.join("\n\n");
+  }
+
+  async searchMemories(
+    query: string,
+    topK: number,
+    context?: AgentContext,
+  ): Promise<HonchoSearchResult[]> {
+    const assistant = await this.getAssistantPeer();
+    const peers =
+      context !== undefined
+        ? await Promise.all(
+            this.getParticipants(context).map((participant) =>
+              this.getDiscordPeer(participant),
+            ),
+          )
+        : await this.getKnownDiscordPeers();
+
+    const results: HonchoSearchResult[] = [];
+    const seen = new Set<string>();
+
+    for (const peer of peers) {
+      const conclusions = await assistant
+        .conclusionsOf(peer)
+        .query(query, topK);
+      for (const conclusion of conclusions) {
+        if (seen.has(conclusion.content)) {
+          continue;
+        }
+        seen.add(conclusion.content);
+        const result: HonchoSearchResult = {
+          content: conclusion.content,
+          source: "conclusion",
+          peerId: peer.id,
+          createdAt: conclusion.createdAt,
+        };
+        const peerName = this.getPeerDisplayName(peer);
+        if (peerName !== undefined) {
+          result.peerName = peerName;
+        }
+        results.push(result);
+      }
+    }
+
+    const messages = await this.honcho.search(query, { limit: topK });
+    for (const message of messages) {
+      const content = `${message.peerId}: ${message.content}`;
+      if (seen.has(content)) {
+        continue;
+      }
+      seen.add(content);
+      results.push({
+        content,
+        source: "message",
+        peerId: message.peerId,
+        createdAt: message.createdAt,
+      });
+    }
+
+    return results.slice(0, topK);
+  }
+
+  private async getAssistantPeer(): Promise<Peer> {
+    return this.getPeer(this.config.honchoAssistantPeerId, {
+      source: "samebot-zero",
+      role: "assistant",
+      displayName: "samebot",
+    });
+  }
+
+  private async getMessagePeer(message: AgentMessage): Promise<Peer> {
+    if (message.role === "assistant") {
+      return this.getAssistantPeer();
+    }
+    if (!message.authorId) {
+      throw new Error(`Cannot sync user message ${message.id} without authorId`);
+    }
+    return this.getPeer(this.discordPeerId(message.authorId), {
+      source: "discord",
+      role: "user",
+      discordUserId: message.authorId,
+      displayName: message.author ?? message.authorId,
+    });
+  }
+
+  private getDiscordPeer(participant: Participant): Promise<Peer> {
+    return this.getPeer(participant.peerId, {
+      source: "discord",
+      role: "user",
+      discordUserId: participant.discordUserId,
+      displayName: participant.displayName,
+    });
+  }
+
+  private getPeer(
+    peerId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<Peer> {
+    const cached = this.peerCache.get(peerId);
+    if (cached) {
+      return cached;
+    }
+
+    const peer = this.honcho.peer(peerId, {
+      metadata,
+      configuration: {
+        observeMe: true,
+      },
+    });
+    this.peerCache.set(peerId, peer);
+    return peer;
+  }
+
+  private getSession(channelId: string, isDm: boolean): Promise<Session> {
+    const sessionId = this.sessionId(channelId, isDm);
+    const cached = this.sessionCache.get(sessionId);
+    if (cached) {
+      return cached;
+    }
+
+    const session = this.honcho.session(sessionId, {
+      metadata: {
+        source: "discord",
+        discordChannelId: channelId,
+        isDm,
+      },
+      configuration: {
+        reasoning: {
+          enabled: true,
+        },
+        peerCard: {
+          use: true,
+          create: true,
+        },
+        summary: {
+          enabled: true,
+        },
+        dream: {
+          enabled: true,
+        },
+      },
+      peers: [
+        [
+          this.config.honchoAssistantPeerId,
+          {
+            observeMe: true,
+            observeOthers: true,
+          },
+        ],
+      ],
+    });
+    this.sessionCache.set(sessionId, session);
+    return session;
+  }
+
+  private async getKnownDiscordPeers(): Promise<Peer[]> {
+    const page = await this.honcho.peers({
+      filters: {
+        metadata: {
+          source: "discord",
+        },
+      },
+      size: GLOBAL_SEARCH_PEER_LIMIT,
+    });
+    return page.items;
+  }
+
+  private getParticipants(context: AgentContext): Participant[] {
+    const participants = new Map<string, Participant>();
+    for (const message of context.history) {
+      if (message.role !== "user" || !message.authorId) {
+        continue;
+      }
+      const peerId = this.discordPeerId(message.authorId);
+      participants.set(peerId, {
+        peerId,
+        discordUserId: message.authorId,
+        displayName: message.author ?? message.authorId,
+      });
+    }
+    return Array.from(participants.values());
+  }
+
+  private formatPeerContext(label: string, context: PeerContext): string {
+    const lines: string[] = [];
+
+    if (context.peerCard && context.peerCard.length > 0) {
+      lines.push("Peer card:");
+      for (const item of context.peerCard) {
+        lines.push(`- ${item}`);
+      }
+    }
+
+    const representation = context.representation?.trim();
+    if (representation) {
+      lines.push(`Representation:\n${representation}`);
+    }
+
+    if (lines.length === 0) {
+      return "";
+    }
+
+    return `${label}:\n${lines.join("\n")}`;
+  }
+
+  private buildMessageContent(message: AgentMessage): string {
+    const imageCount = message.images?.length ?? 0;
+    if (imageCount === 0) {
+      return message.content;
+    }
+    return `${message.content}\n[${imageCount} image${
+      imageCount === 1 ? "" : "s"
+    } attached]`;
+  }
+
+  private discordPeerId(discordUserId: string): string {
+    return `discord-user-${discordUserId}`;
+  }
+
+  private sessionId(channelId: string, isDm: boolean): string {
+    return isDm ? `discord-dm-${channelId}` : `discord-channel-${channelId}`;
+  }
+
+  private getPeerDisplayName(peer: Peer): string | undefined {
+    const displayName = peer.metadata?.displayName;
+    if (typeof displayName === "string") {
+      return displayName;
+    }
+    return undefined;
   }
 }

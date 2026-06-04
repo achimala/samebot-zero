@@ -12,6 +12,14 @@ const ConfigSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z
     .string()
     .min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
+  HONCHO_URL: z.string().url("HONCHO_URL must be a valid URL"),
+  HONCHO_API_KEY: z.string().min(1, "HONCHO_API_KEY is required"),
+  HONCHO_WORKSPACE_ID: z
+    .string()
+    .min(1, "HONCHO_WORKSPACE_ID is required"),
+  HONCHO_ASSISTANT_PEER_ID: z
+    .string()
+    .min(1, "HONCHO_ASSISTANT_PEER_ID is required"),
   MAIN_CHANNEL_ID: z.string().min(1, "MAIN_CHANNEL_ID is required"),
   IMAGE_OF_DAY_CHANNEL_ID: z.string().optional(),
   EMOJI_GUILD_ID: z.string().min(1, "EMOJI_GUILD_ID is required"),
@@ -28,6 +36,10 @@ export type AppConfig = {
   cursorApiKey: string;
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
+  honchoUrl: string;
+  honchoApiKey: string;
+  honchoWorkspaceId: string;
+  honchoAssistantPeerId: string;
   mainChannelId: string;
   imageOfDayChannelId: string;
   emojiGuildId: string;
@@ -52,6 +64,10 @@ export function loadConfig(): AppConfig {
     cursorApiKey: env.CURSOR_API_KEY,
     supabaseUrl: env.SUPABASE_URL,
     supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+    honchoUrl: env.HONCHO_URL,
+    honchoApiKey: env.HONCHO_API_KEY,
+    honchoWorkspaceId: env.HONCHO_WORKSPACE_ID,
+    honchoAssistantPeerId: env.HONCHO_ASSISTANT_PEER_ID,
     mainChannelId: env.MAIN_CHANNEL_ID,
     imageOfDayChannelId: env.IMAGE_OF_DAY_CHANNEL_ID ?? env.MAIN_CHANNEL_ID,
     emojiGuildId: env.EMOJI_GUILD_ID,
