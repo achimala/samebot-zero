@@ -1,5 +1,6 @@
 import "@total-typescript/ts-reset";
 import { loadConfig } from "./core/config";
+import { DeploymentLock } from "./core/deployment-lock";
 import { createLogger } from "./core/logger";
 import { DiscordGateway } from "./discord/gateway";
 import { DiscordMessenger } from "./discord/messenger";
@@ -26,6 +27,10 @@ async function main() {
   const config = loadConfig();
   const logger = createLogger(config.logLevel);
   const gateway = new DiscordGateway(config, logger);
+  const deploymentLock = new DeploymentLock(
+    config.supabaseDbConnectionUri,
+    logger,
+  );
   const messenger = new DiscordMessenger(gateway.client, logger);
   const openai = new OpenAIClient(config, logger);
   const supabase = new SupabaseClient(config, logger);
@@ -69,6 +74,20 @@ async function main() {
   ];
 
   features.forEach((feature) => feature.register(runtime));
+
+  await deploymentLock.acquire();
+  const shutdown = async (signal: NodeJS.Signals) => {
+    logger.info({ signal }, "Shutting down Samebot");
+    await gateway.client.destroy();
+    await deploymentLock.release();
+    process.exit(0);
+  };
+  process.once("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+  process.once("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
 
   await gateway.start();
 }

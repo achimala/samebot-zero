@@ -441,6 +441,10 @@ If appropriate, provide a brief response (1-3 words max). Examples: "same", "sam
     const references: MessageReference[] = [];
 
     for (const message of context.history) {
+      if (message.role === "assistant" && message.content === "(silent)") {
+        continue;
+      }
+
       const messageId = message.id;
       const timeAgo = Math.round((now - message.timestamp) / 1000);
       const timeAgoText =
@@ -532,6 +536,7 @@ You have tools available to:
 IMPORTANT: The scrapbook tools (get_scrapbook_memory, search_scrapbook, get_scrapbook_context) automatically post their results directly to the channel. You do NOT need to repeat or summarize what they show.
 
 Your final text response will be sent as a message to the channel. An empty response sends nothing - use this when your tool calls have already provided the response (like after scrapbook calls). Unless asked to do so, do not add additional commentary after calling the scrapbook tools that auto-post for you, just provide an empty response after those.
+The bracketed timestamps and message IDs are internal context metadata. Never copy or quote those bracketed context lines in your final response.
 
 Message references in context (use these IDs when reacting):
 ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ? ` (${ref.author})` : ""}: ${ref.content}`).join("\n")}${emojiContext}${entityContext}${memoryContext}`;
@@ -544,6 +549,10 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
     ];
 
     for (const message of context.history) {
+      if (message.role === "assistant" && message.content === "(silent)") {
+        continue;
+      }
+
       const now = Date.now();
       const timeAgo = Math.round((now - message.timestamp) / 1000);
       const timeAgoText =

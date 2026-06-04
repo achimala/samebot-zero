@@ -12,6 +12,9 @@ const ConfigSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z
     .string()
     .min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
+  SUPABASE_DB_CONNECTION_URI: z
+    .string()
+    .min(1, "SUPABASE_DB_CONNECTION_URI is required"),
   HONCHO_URL: z.string().url("HONCHO_URL must be a valid URL"),
   HONCHO_API_KEY: z.string().min(1, "HONCHO_API_KEY is required"),
   HONCHO_WORKSPACE_ID: z
@@ -36,6 +39,7 @@ export type AppConfig = {
   cursorApiKey: string;
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
+  supabaseDbConnectionUri: string;
   honchoUrl: string;
   honchoApiKey: string;
   honchoWorkspaceId: string;
@@ -64,6 +68,7 @@ export function loadConfig(): AppConfig {
     cursorApiKey: env.CURSOR_API_KEY,
     supabaseUrl: env.SUPABASE_URL,
     supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+    supabaseDbConnectionUri: env.SUPABASE_DB_CONNECTION_URI,
     honchoUrl: env.HONCHO_URL,
     honchoApiKey: env.HONCHO_API_KEY,
     honchoWorkspaceId: env.HONCHO_WORKSPACE_ID,

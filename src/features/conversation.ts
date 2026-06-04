@@ -17,6 +17,7 @@ import {
 
 const AUTO_REACT_PROBABILITY = 0.15;
 const SAY_SAME_PROBABILITY = 0.2;
+const STARTUP_MESSAGE_SUPPRESSION_MS = 10 * 60 * 1000;
 
 interface ConversationState {
   history: AgentMessage[];
@@ -326,7 +327,10 @@ export class ConversationFeature implements Feature {
 
         if (msg.author.bot || msg.system) {
           if (msg.author.id === this.botUserId) {
-            const content = msg.content || "(silent)";
+            const content = msg.content.trim();
+            if (content.length === 0) {
+              continue;
+            }
             newMessages.push({
               id: msg.id,
               role: "assistant",
@@ -406,6 +410,22 @@ export class ConversationFeature implements Feature {
         return;
       }
 
+      const recentStartupMessage = messages.find(
+        (msg) =>
+          msg.author.id === this.botUserId &&
+          msg.content
+            .toLowerCase()
+            .includes("samebot restarted successfully") &&
+          Date.now() - msg.createdTimestamp < STARTUP_MESSAGE_SUPPRESSION_MS,
+      );
+      if (recentStartupMessage) {
+        this.ctx.logger.info(
+          { messageId: recentStartupMessage.id },
+          "Skipping startup message because one was recently posted",
+        );
+        return;
+      }
+
       const key = mainChannelId;
       let context = this.contexts.get(key) ?? {
         history: [],
@@ -424,10 +444,14 @@ export class ConversationFeature implements Feature {
 
         if (msg.author.bot || msg.system) {
           if (msg.author.id === this.botUserId) {
+            const content = msg.content.trim();
+            if (content.length === 0) {
+              continue;
+            }
             newMessages.push({
               id: msg.id,
               role: "assistant",
-              content: msg.content || "(silent)",
+              content,
               timestamp: msg.createdTimestamp,
             });
           }

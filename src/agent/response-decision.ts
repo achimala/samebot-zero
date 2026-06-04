@@ -112,6 +112,10 @@ Return false when in doubt.`;
     const lines: string[] = [];
 
     for (const message of context.history) {
+      if (message.role === "assistant" && message.content === "(silent)") {
+        continue;
+      }
+
       const timeAgo = Math.round((now - message.timestamp) / 1000);
       const timeAgoText =
         timeAgo < 60
