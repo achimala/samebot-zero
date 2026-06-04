@@ -86,7 +86,7 @@ If you cannot extract any information like those latter examples, just return an
           additionalProperties: false,
         },
         schemaName: "extractedFacts",
-        model: "gpt-5.1",
+        model: "gpt-5.5",
       },
     );
 
@@ -214,7 +214,7 @@ Analyze how the new observation relates to these memories.`;
         additionalProperties: false,
       },
       schemaName: "memoryAnalysis",
-      model: "gpt-5-mini",
+      model: "gpt-5.4-mini",
     });
 
     if (result.isOk()) {

@@ -82,7 +82,7 @@ export class AgentLaunchFeature implements Feature {
     const launchResult = await this.cursorClient.launchAgent({
       repository: REPOSITORY,
       instructions,
-      model: "composer-1",
+      model: "composer-2.5",
     });
 
     if (launchResult.isErr()) {

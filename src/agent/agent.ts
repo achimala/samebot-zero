@@ -1002,7 +1002,7 @@ Note: Any reference images provided are used as references for generation, not a
         additionalProperties: false,
       },
       schemaName: "imagePrompt",
-      model: "gpt-5-mini",
+      model: "gpt-5.4-mini",
     });
 
     if (result.isOk()) {

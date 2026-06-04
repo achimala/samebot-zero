@@ -550,7 +550,7 @@ Return only the name, no explanation.`,
         },
         schemaName: "emojiName",
         schemaDescription: "Generated emoji name based on prompt",
-        model: "gpt-5-nano",
+        model: "gpt-5.4-nano",
       })
       .map((response) => this.sanitizeEmojiName(response.name));
   }

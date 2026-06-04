@@ -59,7 +59,7 @@ Return false when in doubt.`;
     const decision = await this.options.openai.chatStructured<{
       shouldRespond: boolean;
     }>({
-      model: "gpt-5-mini",
+      model: "gpt-5.4-mini",
       messages: [
         {
           role: "system",

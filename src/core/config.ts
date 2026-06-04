@@ -7,7 +7,6 @@ const ConfigSchema = z.object({
   DISCORD_TOKEN: z.string().min(1, "DISCORD_TOKEN is required"),
   DISCORD_APP_ID: z.string().min(1, "DISCORD_APP_ID is required"),
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
-  GOOGLE_API_KEY: z.string().min(1, "GOOGLE_API_KEY is required"),
   CURSOR_API_KEY: z.string().min(1, "CURSOR_API_KEY is required"),
   SUPABASE_URL: z.string().min(1, "SUPABASE_URL is required"),
   SUPABASE_SERVICE_ROLE_KEY: z
@@ -26,7 +25,6 @@ export type AppConfig = {
   discordToken: string;
   discordAppId: string;
   openAIApiKey: string;
-  googleApiKey: string;
   cursorApiKey: string;
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
@@ -51,7 +49,6 @@ export function loadConfig(): AppConfig {
     discordToken: env.DISCORD_TOKEN,
     discordAppId: env.DISCORD_APP_ID,
     openAIApiKey: env.OPENAI_API_KEY,
-    googleApiKey: env.GOOGLE_API_KEY,
     cursorApiKey: env.CURSOR_API_KEY,
     supabaseUrl: env.SUPABASE_URL,
     supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,

@@ -34,7 +34,6 @@ function createOpenAIClient(): OpenAIClient | null {
   return new OpenAIClient(
     {
       openAIApiKey: apiKey,
-      googleApiKey: "",
       discordToken: "",
       discordAppId: "",
       cursorApiKey: "",

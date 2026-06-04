@@ -36,7 +36,7 @@ Return false if the message has substance and should be enhanced.`;
   const decision = await openai.chatStructured<{
     isTrivial: boolean;
   }>({
-    model: "gpt-5-mini",
+    model: "gpt-5.4-mini",
     messages: [
       {
         role: "system",

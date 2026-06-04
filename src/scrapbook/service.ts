@@ -71,7 +71,7 @@ Do NOT select messages that are:
         additionalProperties: false,
       },
       schemaName: "scrapbookDetection",
-      model: "gpt-5-mini",
+      model: "gpt-5.4-mini",
     });
 
     if (!result.isOk()) {
