@@ -1,6 +1,6 @@
 import "@total-typescript/ts-reset";
 import { createHmac, randomBytes } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -83,7 +83,6 @@ const apiService = await ensureRenderService({
   name: env.HONCHO_API_SERVICE_NAME,
   type: "private_service",
   startCommand: "sh docker/entrypoint.sh",
-  healthCheckPath: "/health",
   envVars: honchoEnv,
 });
 await putServiceEnv(apiService.id, honchoEnv);
@@ -159,7 +158,7 @@ async function ensureRenderService(options: {
       "--output",
       "json",
     ];
-    if (options.healthCheckPath) {
+    if (options.healthCheckPath && options.type !== "private_service") {
       updateArgs.push("--health-check-path", options.healthCheckPath);
     }
     run("render", updateArgs);
@@ -191,7 +190,7 @@ async function ensureRenderService(options: {
     "--output",
     "json",
   ];
-  if (options.healthCheckPath) {
+  if (options.healthCheckPath && options.type !== "private_service") {
     createArgs.push("--health-check-path", options.healthCheckPath);
   }
   for (const [key, value] of options.envVars.entries()) {
@@ -275,11 +274,19 @@ async function renderApi(path: string, init: RequestInit = {}): Promise<unknown>
 }
 
 function run(command: string, args: string[]): string {
-  return execFileSync(command, args, {
+  const result = spawnSync(command, args, {
     cwd: process.cwd(),
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  if (result.status !== 0) {
+    const output = scrubCommandOutput(`${result.stdout}${result.stderr}`);
+    if (output.trim().length > 0) {
+      process.stderr.write(output);
+    }
+    throw new Error(`${command} failed with exit code ${result.status ?? "unknown"}`);
+  }
+  return result.stdout;
 }
 
 function runPsql(connectionUri: string, sql: string): void {
@@ -326,4 +333,11 @@ function createWorkspaceJwt(secret: string, workspaceId: string): string {
 
 function base64Url(value: string): string {
   return Buffer.from(value).toString("base64url");
+}
+
+function scrubCommandOutput(output: string): string {
+  return output
+    .replace(/(--env-var\s+[^=\s]+=)(\S+)/g, "$1***")
+    .replace(/postgresql(?:\+psycopg)?:\/\/\S+/g, "postgresql://***")
+    .replace(/sk-[A-Za-z0-9_-]+/g, "sk-***");
 }
