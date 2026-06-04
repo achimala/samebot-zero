@@ -17,7 +17,9 @@ export class GifCommandFeature implements Feature {
     context.discord.on("interactionCreate", (interaction) => {
       if (interaction.isChatInputCommand()) {
         if (interaction.commandName === "gif") {
-          void this.handleGif(interaction);
+          void this.handleGif(interaction).catch((error) => {
+            this.ctx.logger.error({ err: error }, "GIF command failed");
+          });
         }
         return;
       }
