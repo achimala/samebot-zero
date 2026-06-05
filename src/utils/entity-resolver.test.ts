@@ -354,7 +354,10 @@ describe("EntityResolver", () => {
       const built = resolver.buildPromptWithReferences(result);
 
       expect(built.textPrompt).toContain(
-        "Reference images of tyrus (use as references for generation",
+        "Reference images of tyrus (use these as references to generate their likeness",
+      );
+      expect(built.textPrompt).toContain(
+        "they do not need to match the exact expression or pose from the references",
       );
       expect(built.textPrompt).toContain("[2 images attached]");
       expect(built.textPrompt).toContain("generate an image of tyrus");
