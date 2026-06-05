@@ -7,6 +7,9 @@ const MAX_REFERENCE_IMAGES_PER_ENTITY = 3;
 const FUSE_THRESHOLD = 0.3;
 const MIN_MATCH_SCORE = 0.7;
 
+export const ENTITY_REFERENCE_IMAGE_INSTRUCTION =
+  "use these as references to generate their likeness — they do not need to match the exact expression or pose from the references, and should not be pasted directly into the output";
+
 interface SearchableEntity {
   searchTerm: string;
   folderName: string;
@@ -180,7 +183,7 @@ export class EntityResolver {
     for (const entity of result.entities) {
       const imageCount = entity.referenceImages.length;
       referenceImageSections.push(
-        `Reference images of ${entity.name} (use as references for generation, not to be directly pasted): [${imageCount} image${imageCount !== 1 ? "s" : ""} attached]`,
+        `Reference images of ${entity.name} (${ENTITY_REFERENCE_IMAGE_INSTRUCTION}): [${imageCount} image${imageCount !== 1 ? "s" : ""} attached]`,
       );
       allReferenceImages.push(...entity.referenceImages);
     }
