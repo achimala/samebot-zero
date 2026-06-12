@@ -217,6 +217,7 @@ export class SamebotEmojiFeature implements Feature {
       promptInput,
       referenceImages.length > 0 ? referenceImages : undefined,
       nameInput,
+      isEditMode ? 1 : 0,
     );
 
     if (!newPreview) {

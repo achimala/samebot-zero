@@ -2,13 +2,11 @@ import Fuse from "fuse.js";
 import type { SupabaseClient } from "../supabase/client";
 import type { Logger } from "pino";
 import type { ReferenceImage } from "./emoji-generator";
+import { formatEntityReferenceImageLabel } from "./reference-image-prompt";
 
 const MAX_REFERENCE_IMAGES_PER_ENTITY = 3;
 const FUSE_THRESHOLD = 0.3;
 const MIN_MATCH_SCORE = 0.7;
-
-export const ENTITY_REFERENCE_IMAGE_INSTRUCTION =
-  "use these as references to generate their likeness — they do not need to match the exact expression or pose from the references, and should not be pasted directly into the output";
 
 interface SearchableEntity {
   searchTerm: string;
@@ -173,19 +171,28 @@ export class EntityResolver {
     };
   }
 
-  buildPromptWithReferences(result: EntityResolutionResult): {
+  buildPromptWithReferences(
+    result: EntityResolutionResult,
+    firstImageIndex: number = 1,
+  ): {
     textPrompt: string;
     referenceImages: ReferenceImage[];
   } {
     const referenceImageSections: string[] = [];
     const allReferenceImages: ReferenceImage[] = [];
+    let nextImageIndex = firstImageIndex;
 
     for (const entity of result.entities) {
       const imageCount = entity.referenceImages.length;
       referenceImageSections.push(
-        `Reference images of ${entity.name} (${ENTITY_REFERENCE_IMAGE_INSTRUCTION}): [${imageCount} image${imageCount !== 1 ? "s" : ""} attached]`,
+        formatEntityReferenceImageLabel(
+          entity.name,
+          imageCount,
+          nextImageIndex,
+        ),
       );
       allReferenceImages.push(...entity.referenceImages);
+      nextImageIndex += imageCount;
     }
 
     const textPrompt = `${referenceImageSections.join("\n")}\n\n${result.originalPrompt}`;

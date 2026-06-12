@@ -235,6 +235,7 @@ export class GifEmojiFeature implements Feature {
       referenceImages.length > 0 ? referenceImages : undefined,
       nameInput,
       gifOptions,
+      isEditMode ? 1 : 0,
     );
 
     if (!newPreview) {

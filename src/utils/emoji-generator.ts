@@ -62,6 +62,7 @@ export class EmojiGenerator {
     prompt: string,
     referenceImages?: ReferenceImage[],
     customName?: string,
+    baseImageCount: number = 0,
   ): Promise<EmojiPreview | null> {
     let effectivePrompt = prompt;
     let effectiveReferenceImages = referenceImages;
@@ -97,6 +98,7 @@ export class EmojiGenerator {
     };
     if (effectiveReferenceImages && effectiveReferenceImages.length > 0) {
       imageOptions.referenceImages = effectiveReferenceImages;
+      imageOptions.baseImageCount = baseImageCount;
     }
     const imagePromise = this.ctx.openai.generateImage(imageOptions);
 
@@ -138,6 +140,7 @@ export class EmojiGenerator {
     referenceImages?: ReferenceImage[],
     customName?: string,
     gifOptions: GifOptions = DEFAULT_GIF_OPTIONS,
+    baseImageCount: number = 0,
   ): Promise<EmojiPreview | null> {
     let effectivePrompt = prompt;
     let effectiveReferenceImages = referenceImages;
@@ -174,6 +177,7 @@ export class EmojiGenerator {
     };
     if (effectiveReferenceImages && effectiveReferenceImages.length > 0) {
       imageOptions.referenceImages = effectiveReferenceImages;
+      imageOptions.baseImageCount = baseImageCount;
     }
     const imagePromise = this.ctx.openai.generateImage(imageOptions);
 

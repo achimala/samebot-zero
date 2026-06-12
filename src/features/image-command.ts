@@ -197,7 +197,7 @@ export class ImageCommandFeature implements Feature {
 
     const resolution = await this.entityResolver.resolve(newPrompt);
     if (resolution) {
-      const built = this.entityResolver.buildPromptWithReferences(resolution);
+      const built = this.entityResolver.buildPromptWithReferences(resolution, 2);
       effectivePrompt = built.textPrompt;
       referenceImages = built.referenceImages
         ? [previousImageAsReference, ...built.referenceImages]
@@ -211,6 +211,7 @@ export class ImageCommandFeature implements Feature {
     const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
       prompt: effectivePrompt,
       referenceImages,
+      baseImageCount: 1,
     };
 
     const result = await this.ctx.openai.generateImage(imageOptions);
