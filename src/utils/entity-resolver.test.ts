@@ -354,12 +354,8 @@ describe("EntityResolver", () => {
       const built = resolver.buildPromptWithReferences(result);
 
       expect(built.textPrompt).toContain(
-        "Reference images of tyrus (use these as references to generate their likeness",
+        "Images 1-2: likeness reference for tyrus",
       );
-      expect(built.textPrompt).toContain(
-        "they do not need to match the exact expression or pose from the references",
-      );
-      expect(built.textPrompt).toContain("[2 images attached]");
       expect(built.textPrompt).toContain("generate an image of tyrus");
       expect(built.referenceImages).toHaveLength(2);
     });
@@ -381,7 +377,7 @@ describe("EntityResolver", () => {
 
       const built = resolver.buildPromptWithReferences(result);
 
-      expect(built.textPrompt).toContain("[1 image attached]");
+      expect(built.textPrompt).toContain("Image 1: likeness reference for tyrus");
     });
 
     it("should handle multiple entities", () => {
@@ -409,9 +405,28 @@ describe("EntityResolver", () => {
 
       const built = resolver.buildPromptWithReferences(result);
 
-      expect(built.textPrompt).toContain("Reference images of tyrus");
-      expect(built.textPrompt).toContain("Reference images of anshu");
+      expect(built.textPrompt).toContain("Image 1: likeness reference for tyrus");
+      expect(built.textPrompt).toContain("Images 2-3: likeness reference for anshu");
       expect(built.referenceImages).toHaveLength(3);
+    });
+    it("should offset image indices when a base image is attached first", () => {
+      const mockSupabase = createMockSupabaseClient([]);
+      const resolver = new EntityResolver(mockSupabase, mockLogger);
+
+      const result = {
+        entities: [
+          {
+            name: "tyrus",
+            folderName: "tyrus",
+            referenceImages: [{ data: "data1", mimeType: "image/jpeg" }],
+          },
+        ],
+        originalPrompt: "add tyrus to the scene",
+      };
+
+      const built = resolver.buildPromptWithReferences(result, 2);
+
+      expect(built.textPrompt).toContain("Image 2: likeness reference for tyrus");
     });
   });
 });

@@ -403,7 +403,7 @@ Note: Any reference images provided are used as references for generation, not a
 
     const resolution = await this.entityResolver.resolve(newPrompt);
     if (resolution) {
-      const built = this.entityResolver.buildPromptWithReferences(resolution);
+      const built = this.entityResolver.buildPromptWithReferences(resolution, 2);
       effectivePrompt = built.textPrompt;
       referenceImages = built.referenceImages
         ? [previousImageAsReference, ...built.referenceImages]
@@ -417,6 +417,7 @@ Note: Any reference images provided are used as references for generation, not a
     const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
       prompt: effectivePrompt,
       referenceImages,
+      baseImageCount: 1,
       aspectRatio: "16:9",
     };
 

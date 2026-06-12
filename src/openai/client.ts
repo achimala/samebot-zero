@@ -3,6 +3,7 @@ import { ResultAsync, err, ok } from "neverthrow";
 import type { Logger } from "pino";
 import type { AppConfig } from "../core/config";
 import { Errors, type BotError } from "../core/errors";
+import { augmentPromptForReferenceImages } from "../utils/reference-image-prompt";
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -387,6 +388,7 @@ export class OpenAIClient {
   generateImage(options: {
     prompt: string;
     referenceImages?: Array<{ data: string; mimeType: string }>;
+    baseImageCount?: number;
     aspectRatio?: ImageAspectRatio;
     imageSize?: ImageResolution;
   }) {
@@ -413,6 +415,7 @@ export class OpenAIClient {
   private async createImage(options: {
     prompt: string;
     referenceImages?: Array<{ data: string; mimeType: string }>;
+    baseImageCount?: number;
     aspectRatio?: ImageAspectRatio;
     imageSize?: ImageResolution;
   }): Promise<OpenAI.Images.ImagesResponse> {
@@ -422,6 +425,11 @@ export class OpenAIClient {
     );
 
     if (options.referenceImages && options.referenceImages.length > 0) {
+      const prompt = augmentPromptForReferenceImages(
+        options.prompt,
+        options.referenceImages.length,
+        options.baseImageCount ?? 0,
+      );
       const imageFiles = await Promise.all(
         options.referenceImages.map((image, index) =>
           toFile(
@@ -435,7 +443,7 @@ export class OpenAIClient {
       return this.client.images.edit({
         model: IMAGE_MODEL,
         image: imageFiles,
-        prompt: options.prompt,
+        prompt,
         size,
       });
     }
