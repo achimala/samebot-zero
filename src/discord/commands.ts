@@ -94,6 +94,12 @@ export const commandDefinitions = [
         .setRequired(false)
         .setMinValue(0)
         .setMaxValue(30),
+    )
+    .addBooleanOption((option) =>
+      option
+        .setName("remove_background")
+        .setDescription("Remove magenta background (default: true)")
+        .setRequired(false),
     ),
   new SlashCommandBuilder()
     .setName("gif")
@@ -137,5 +143,11 @@ export const commandDefinitions = [
         .setRequired(false)
         .setMinValue(0)
         .setMaxValue(30),
+    )
+    .addBooleanOption((option) =>
+      option
+        .setName("remove_background")
+        .setDescription("Remove magenta background (default: true)")
+        .setRequired(false),
     ),
 ].map((builder) => builder.toJSON());
