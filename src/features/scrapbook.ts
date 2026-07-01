@@ -14,6 +14,7 @@ import {
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import type { ScrapbookMemory } from "../scrapbook/store";
 import { EntityResolver } from "../utils/entity-resolver";
+import { generateScrapbookImagePrompt } from "../utils/scrapbook-image-prompt";
 
 const INACTIVITY_TIMEOUT_MS = 90 * 60 * 1000;
 const SCRAPBOOK_EXTRACTION_INTERVAL = 6;
@@ -246,70 +247,12 @@ export class ScrapbookFeature implements Feature {
   private async generateImagePromptForMemory(
     memory: ScrapbookMemory,
   ): Promise<{ textPrompt: string; referenceImages?: Array<{ data: string; mimeType: string }> } | null> {
-    const contextText = memory.context
-      .map((m) => `<${m.author}> ${m.content}`)
-      .join("\n");
-
-    const authors = new Set<string>();
-    authors.add(memory.author);
-    for (const m of memory.context) {
-      authors.add(m.author);
-    }
-    const authorText = Array.from(authors).join(" ");
-
-    const entityResolution = await this.entityResolver.resolve(authorText);
-    let basePrompt = `Create an image prompt based on this conversation. Use the full conversation context to capture the scene:\n\nConversation context:\n${contextText}\n\nKey quote: "${memory.keyMessage}" - ${memory.author}`;
-    let referenceImages: Array<{ data: string; mimeType: string }> | undefined;
-
-    if (entityResolution) {
-      const built = this.entityResolver.buildPromptWithReferences(entityResolution);
-      basePrompt = `${built.textPrompt}\n\n${basePrompt}`;
-      referenceImages = built.referenceImages;
-    }
-
-    const result = await this.ctx.openai.chatStructured<{ prompt: string }>({
-      messages: [
-        {
-          role: "system",
-          content: `You create artistic image prompts based on chat conversations.
-Given a chat quote and its full conversation context, create a creative, whimsical image prompt that captures the scene and essence of the moment.
-The image should be surreal, artistic, and evocative - not a literal depiction.
-Use the entire conversation context to understand the scene, mood, and setting of the moment.
-Keep the prompt concise (under 100 words).
-Note: Any reference images provided are used as references for generation, not as images to be directly pasted into the output.`,
-        },
-        {
-          role: "user",
-          content: basePrompt,
-        },
-      ],
-      schema: {
-        type: "object",
-        properties: {
-          prompt: {
-            type: "string",
-            description: "The image generation prompt",
-          },
-        },
-        required: ["prompt"],
-        additionalProperties: false,
-      },
-      schemaName: "imagePrompt",
-      model: "gpt-5.4-mini",
-    });
-
-    if (result.isOk()) {
-      return {
-        textPrompt: result.value.prompt,
-        referenceImages,
-      };
-    }
-
-    this.ctx.logger.warn(
-      { err: result.error },
-      "Failed to generate image prompt for scrapbook memory",
+    return generateScrapbookImagePrompt(
+      this.ctx.openai,
+      this.entityResolver,
+      memory,
+      this.ctx.logger,
     );
-    return null;
   }
 
   private createEditButtonRow(messageId: string): ActionRowBuilder<ButtonBuilder> {
