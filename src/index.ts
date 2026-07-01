@@ -17,6 +17,7 @@ import { UsaCowboyFeature } from "./features/usa-cowboy";
 import { SamebotEmojiFeature } from "./features/samebot-emoji";
 import { GifEmojiFeature } from "./features/gif-emoji";
 import { GifCommandFeature } from "./features/gif-command";
+import { VideoCommandFeature } from "./features/video-command";
 import { RobotEmojiReactFeature } from "./features/robot-emoji-react";
 import { RememberImageFeature } from "./features/remember-image";
 import { ScrapbookFeature } from "./features/scrapbook";
@@ -71,6 +72,7 @@ async function main() {
     new SamebotEmojiFeature(),
     new GifEmojiFeature(),
     new GifCommandFeature(),
+    new VideoCommandFeature(),
     new RobotEmojiReactFeature(),
     new RememberImageFeature(),
     new ScrapbookFeature(),

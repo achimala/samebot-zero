@@ -70,7 +70,7 @@ export const commandDefinitions = [
     .addIntegerOption((option) =>
       option
         .setName("frames")
-        .setDescription("Number of frames to sample from the video. Default: 9")
+        .setDescription("Max frames to sample from the video. Default: 25")
         .setRequired(false)
         .addChoices(
           { name: "4 (2x2)", value: 4 },
@@ -82,7 +82,7 @@ export const commandDefinitions = [
     .addIntegerOption((option) =>
       option
         .setName("fps")
-        .setDescription("Frames per second (1-20). Default: 5")
+        .setDescription("Frames per second (1-20). Default: 12")
         .setRequired(false)
         .setMinValue(1)
         .setMaxValue(20),
@@ -94,6 +94,31 @@ export const commandDefinitions = [
         .setRequired(false)
         .setMinValue(0)
         .setMaxValue(30),
+    ),
+  new SlashCommandBuilder()
+    .setName("video")
+    .setDescription("Generate a video with Gemini Omni")
+    .addStringOption((option) =>
+      option
+        .setName("prompt")
+        .setDescription("Describe what the video should look like")
+        .setRequired(true),
+    )
+    .addAttachmentOption((option) =>
+      option
+        .setName("reference")
+        .setDescription("Optional reference image to base the video on")
+        .setRequired(false),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("aspect_ratio")
+        .setDescription("Video aspect ratio. Default: 16:9")
+        .setRequired(false)
+        .addChoices(
+          { name: "16:9 (landscape)", value: "16:9" },
+          { name: "9:16 (portrait)", value: "9:16" },
+        ),
     ),
   new SlashCommandBuilder()
     .setName("gif")
@@ -113,7 +138,7 @@ export const commandDefinitions = [
     .addIntegerOption((option) =>
       option
         .setName("frames")
-        .setDescription("Number of frames to sample from the video. Default: 9")
+        .setDescription("Max frames to sample from the video. Default: 25")
         .setRequired(false)
         .addChoices(
           { name: "4 (2x2)", value: 4 },
@@ -125,7 +150,7 @@ export const commandDefinitions = [
     .addIntegerOption((option) =>
       option
         .setName("fps")
-        .setDescription("Frames per second (1-20). Default: 5")
+        .setDescription("Frames per second (1-20). Default: 12")
         .setRequired(false)
         .setMinValue(1)
         .setMaxValue(20),
