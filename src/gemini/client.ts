@@ -44,7 +44,7 @@ export class GeminiClient {
     private readonly config: AppConfig,
     private readonly logger: Logger,
   ) {
-    this.client = new GoogleGenAI({ apiKey: config.geminiApiKey });
+    this.client = new GoogleGenAI({ apiKey: config.googleApiKey });
   }
 
   generateImage(options: GenerateImageOptions) {
@@ -226,7 +226,7 @@ export class GeminiClient {
     if (outputVideo?.uri) {
       const response = await fetch(outputVideo.uri, {
         headers: {
-          "x-goog-api-key": this.config.geminiApiKey,
+          "x-goog-api-key": this.config.googleApiKey,
         },
       });
 
