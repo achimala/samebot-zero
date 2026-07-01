@@ -1,3 +1,14 @@
+import {
+  mkdtemp,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import sharp from "sharp";
 import GIFEncoder from "gif-encoder-2";
 
@@ -17,23 +28,23 @@ export async function processEmojiImage(inputBuffer: Buffer): Promise<Buffer> {
   const pixels = new Uint8Array(data);
   const channels = info.channels;
 
-  for (let i = 0; i < pixels.length; i += channels) {
-    const red = pixels[i] ?? 0;
-    const green = pixels[i + 1] ?? 0;
-    const blue = pixels[i + 2] ?? 0;
-    const currentAlpha = pixels[i + 3] ?? 255;
+  for (let index = 0; index < pixels.length; index += channels) {
+    const red = pixels[index] ?? 0;
+    const green = pixels[index + 1] ?? 0;
+    const blue = pixels[index + 2] ?? 0;
+    const currentAlpha = pixels[index + 3] ?? 255;
 
     const magentaScore = calculateMagentaScore(red, green, blue);
 
     if (magentaScore > 0) {
       const newAlpha = Math.round(currentAlpha * (1 - magentaScore));
-      pixels[i + 3] = newAlpha;
+      pixels[index + 3] = newAlpha;
 
       if (newAlpha > 0 && magentaScore > 0.1) {
         const despillResult = despillMagenta(red, green, blue, magentaScore);
-        pixels[i] = despillResult.red;
-        pixels[i + 1] = despillResult.green;
-        pixels[i + 2] = despillResult.blue;
+        pixels[index] = despillResult.red;
+        pixels[index + 1] = despillResult.green;
+        pixels[index + 2] = despillResult.blue;
       }
     }
   }
@@ -107,7 +118,6 @@ export interface GifOptions {
 
 export function buildGifPrompt(
   prompt: string,
-  gridSize: number,
   isEmoji: boolean = false,
 ): string {
   const parts: string[] = [prompt];
@@ -117,38 +127,104 @@ export function buildGifPrompt(
       "solid bright magenta background (#FF00FF) wherever it should be transparent",
       "suitable as a Discord emoji",
       "will be displayed very small so make things clear and avoid fine details or small text",
-      "",
     );
   }
 
   parts.push(
-    `Create a ${gridSize}x${gridSize} grid of animation frames showing the progression of ${isEmoji ? "this emoji" : "this scene"}.`,
-    "Each frame should be as stable as possible with minimal changes between frames.",
-    `Arranged in a ${gridSize}x${gridSize} grid layout (${gridSize} rows, ${gridSize} columns).`,
-    "The frames should show a smooth animation sequence from top-left to bottom-right.",
-    "",
-    "IMPORTANT: Do NOT draw any borders, lines, gaps, or separators between frames.",
-    "The frames must tile directly against each other with no visible divisions.",
+    "In a single unbroken scene with no scene cuts.",
+    "Smooth continuous animation suitable for looping as a GIF.",
+    "No dialogue. No sound effects.",
   );
 
   return parts.join(" ");
 }
 
-export async function processGifEmojiGrid(
-  inputBuffer: Buffer,
+export async function processVideoToGif(
+  videoBuffer: Buffer,
   options: GifOptions = { frames: 9, fps: 5, loopDelay: 0 },
+  targetSize: number = 128,
 ): Promise<Buffer> {
-  const image = sharp(inputBuffer);
-  const metadata = await image.metadata();
+  const tempDirectory = await mkdtemp(join(tmpdir(), "samebot-gif-"));
+  const videoPath = join(tempDirectory, "input.mp4");
+  const framesDirectory = join(tempDirectory, "frames");
 
-  if (!metadata.width || !metadata.height) {
-    throw new Error("Could not read image dimensions");
+  try {
+    await writeFile(videoPath, videoBuffer);
+    await mkdir(framesDirectory, { recursive: true });
+
+    const durationSeconds = await getVideoDurationSeconds(videoPath);
+    const extractionFrameRate = options.frames / durationSeconds;
+
+    await runCommand("ffmpeg", [
+      "-y",
+      "-i",
+      videoPath,
+      "-vf",
+      `fps=${extractionFrameRate},scale=${targetSize}:${targetSize}:force_original_aspect_ratio=decrease,pad=${targetSize}:${targetSize}:(ow-iw)/2:(oh-ih)/2:color=0xFF00FF`,
+      "-frames:v",
+      String(options.frames),
+      join(framesDirectory, "frame_%03d.png"),
+    ]);
+
+    const frameFileNames = (await readdir(framesDirectory))
+      .filter((fileName) => fileName.endsWith(".png"))
+      .sort();
+
+    if (frameFileNames.length === 0) {
+      throw new Error("Video frame extraction produced no frames");
+    }
+
+    const processedFrames: Uint8Array[] = [];
+    for (const fileName of frameFileNames) {
+      const frameBuffer = await readFile(join(framesDirectory, fileName));
+      processedFrames.push(await chromaKeyGifFrame(frameBuffer));
+    }
+
+    return encodeGif(processedFrames, options, targetSize);
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+}
+
+async function chromaKeyGifFrame(frameBuffer: Buffer): Promise<Uint8Array> {
+  const { data, info } = await sharp(frameBuffer)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const pixels = new Uint8Array(data);
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const red = pixels[index] ?? 0;
+    const green = pixels[index + 1] ?? 0;
+    const blue = pixels[index + 2] ?? 0;
+
+    const magentaScore = calculateMagentaScore(red, green, blue);
+
+    if (magentaScore > 0.5) {
+      pixels[index] = 1;
+      pixels[index + 1] = 1;
+      pixels[index + 2] = 1;
+      pixels[index + 3] = 0;
+    } else if (magentaScore > 0.1) {
+      const despilled = despillMagenta(red, green, blue, magentaScore);
+      pixels[index] = despilled.red;
+      pixels[index + 1] = despilled.green;
+      pixels[index + 2] = despilled.blue;
+      pixels[index + 3] = 255;
+    } else {
+      pixels[index + 3] = 255;
+    }
   }
 
-  const gridSize = Math.sqrt(options.frames);
-  const frameWidth = Math.floor(metadata.width / gridSize);
-  const frameHeight = Math.floor(metadata.height / gridSize);
-  const targetSize = 128;
+  return pixels;
+}
+
+function encodeGif(
+  processedFrames: Uint8Array[],
+  options: GifOptions,
+  targetSize: number,
+): Buffer {
   const frameDelay = Math.round(1000 / options.fps);
 
   const encoder = new GIFEncoder(targetSize, targetSize, "neuquant", true);
@@ -158,67 +234,70 @@ export async function processGifEmojiGrid(
   encoder.setDispose(2);
   encoder.setTransparent(0x010101);
 
-  const processedFrames: Uint8Array[] = [];
-
-  for (let row = 0; row < gridSize; row++) {
-    for (let col = 0; col < gridSize; col++) {
-      const left = col * frameWidth;
-      const top = row * frameHeight;
-
-      const { data } = await image
-        .clone()
-        .extract({
-          left,
-          top,
-          width: frameWidth,
-          height: frameHeight,
-        })
-        .resize(targetSize, targetSize, {
-          fit: "contain",
-          background: { r: 255, g: 0, b: 255, alpha: 1 },
-        })
-        .ensureAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-
-      const pixels = new Uint8Array(data);
-
-      for (let i = 0; i < pixels.length; i += 4) {
-        const red = pixels[i] ?? 0;
-        const green = pixels[i + 1] ?? 0;
-        const blue = pixels[i + 2] ?? 0;
-
-        const magentaScore = calculateMagentaScore(red, green, blue);
-
-        if (magentaScore > 0.5) {
-          pixels[i] = 1;
-          pixels[i + 1] = 1;
-          pixels[i + 2] = 1;
-          pixels[i + 3] = 0;
-        } else if (magentaScore > 0.1) {
-          const despilled = despillMagenta(red, green, blue, magentaScore);
-          pixels[i] = despilled.red;
-          pixels[i + 1] = despilled.green;
-          pixels[i + 2] = despilled.blue;
-          pixels[i + 3] = 255;
-        } else {
-          pixels[i + 3] = 255;
-        }
-      }
-
-      processedFrames.push(pixels);
-    }
-  }
-
-  for (let i = 0; i < processedFrames.length; i++) {
-    const isLastFrame = i === processedFrames.length - 1;
-    const delay = isLastFrame && options.loopDelay > 0
-      ? frameDelay + (frameDelay * options.loopDelay)
-      : frameDelay;
+  for (let frameIndex = 0; frameIndex < processedFrames.length; frameIndex++) {
+    const isLastFrame = frameIndex === processedFrames.length - 1;
+    const delay =
+      isLastFrame && options.loopDelay > 0
+        ? frameDelay + frameDelay * options.loopDelay
+        : frameDelay;
     encoder.setDelay(delay);
-    encoder.addFrame(processedFrames[i]!);
+    encoder.addFrame(processedFrames[frameIndex]!);
   }
 
   encoder.finish();
   return encoder.out.getData();
+}
+
+async function getVideoDurationSeconds(videoPath: string): Promise<number> {
+  const output = await runCommand("ffprobe", [
+    "-v",
+    "error",
+    "-show_entries",
+    "format=duration",
+    "-of",
+    "default=noprint_wrappers=1:nokey=1",
+    videoPath,
+  ]);
+
+  const durationSeconds = Number.parseFloat(output.trim());
+
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw new Error("Could not determine video duration");
+  }
+
+  return durationSeconds;
+}
+
+function runCommand(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+
+    const childProcess = spawn(command, args);
+
+    childProcess.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+
+    childProcess.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    childProcess.on("error", (error) => {
+      reject(error);
+    });
+
+    childProcess.on("close", (exitCode) => {
+      if (exitCode === 0) {
+        resolve(stdout);
+        return;
+      }
+
+      reject(
+        new Error(
+          `${command} exited with code ${exitCode}: ${stderr || stdout}`,
+        ),
+      );
+    });
+  });
 }

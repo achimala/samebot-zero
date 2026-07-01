@@ -1,9 +1,8 @@
-import OpenAI, { toFile } from "openai";
+import OpenAI from "openai";
 import { ResultAsync, err, ok } from "neverthrow";
 import type { Logger } from "pino";
 import type { AppConfig } from "../core/config";
 import { Errors, type BotError } from "../core/errors";
-import { augmentPromptForReferenceImages } from "../utils/reference-image-prompt";
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -33,47 +32,9 @@ export type ToolStepResult =
   | { done: true; text: string }
   | { done: false; toolCalls: ToolCall[]; responseId: string };
 
-const DEFAULT_IMAGE_CONFIG = {
-  aspectRatio: "1:1" as const,
-  imageSize: "1K" as const,
-};
-
 const CHAT_MODEL = "gpt-5.5";
 const EMBEDDING_MODEL = "text-embedding-3-large";
 const EMBEDDING_DIMENSIONS = 768;
-const IMAGE_MODEL = "gpt-image-2";
-
-type ImageAspectRatio =
-  | "1:1"
-  | "2:3"
-  | "3:2"
-  | "3:4"
-  | "4:3"
-  | "9:16"
-  | "16:9"
-  | "21:9";
-
-type ImageResolution = "1K" | "2K" | "4K";
-
-const IMAGE_ASPECT_RATIOS: Record<ImageAspectRatio, [number, number]> = {
-  "1:1": [1, 1],
-  "2:3": [2, 3],
-  "3:2": [3, 2],
-  "3:4": [3, 4],
-  "4:3": [4, 3],
-  "9:16": [9, 16],
-  "16:9": [16, 9],
-  "21:9": [21, 9],
-};
-
-const IMAGE_SHORT_EDGE_BY_RESOLUTION: Record<ImageResolution, number> = {
-  "1K": 1024,
-  "2K": 2048,
-  "4K": 3840,
-};
-
-const MAX_IMAGE_EDGE = 3840;
-const MAX_IMAGE_PIXELS = 8_294_400;
 
 export class OpenAIClient {
   private readonly client: OpenAI;
@@ -383,116 +344,6 @@ export class OpenAIClient {
       }
       return ok(embedding);
     });
-  }
-
-  generateImage(options: {
-    prompt: string;
-    referenceImages?: Array<{ data: string; mimeType: string }>;
-    baseImageCount?: number;
-    aspectRatio?: ImageAspectRatio;
-    imageSize?: ImageResolution;
-  }) {
-    return ResultAsync.fromPromise(
-      this.createImage(options),
-      (error) => {
-        this.logger.error({ err: error }, "OpenAI image failed");
-        return Errors.openai(
-          error instanceof Error ? error.message : "Unknown OpenAI error",
-        );
-      },
-    ).andThen((response) => {
-      const imageData = response.data?.[0]?.b64_json;
-      if (imageData) {
-        const buffer = Buffer.from(imageData, "base64");
-        return ok({ buffer, prompt: options.prompt });
-      }
-      return err<never, BotError>(
-        Errors.openai("Image generation returned no data"),
-      );
-    });
-  }
-
-  private async createImage(options: {
-    prompt: string;
-    referenceImages?: Array<{ data: string; mimeType: string }>;
-    baseImageCount?: number;
-    aspectRatio?: ImageAspectRatio;
-    imageSize?: ImageResolution;
-  }): Promise<OpenAI.Images.ImagesResponse> {
-    const size = this.resolveImageSize(
-      options.aspectRatio ?? DEFAULT_IMAGE_CONFIG.aspectRatio,
-      options.imageSize ?? DEFAULT_IMAGE_CONFIG.imageSize,
-    );
-
-    if (options.referenceImages && options.referenceImages.length > 0) {
-      const prompt = augmentPromptForReferenceImages(
-        options.prompt,
-        options.referenceImages.length,
-        options.baseImageCount ?? 0,
-      );
-      const imageFiles = await Promise.all(
-        options.referenceImages.map((image, index) =>
-          toFile(
-            Buffer.from(image.data, "base64"),
-            `reference-${index}.${this.extensionForMimeType(image.mimeType)}`,
-            { type: image.mimeType },
-          ),
-        ),
-      );
-
-      return this.client.images.edit({
-        model: IMAGE_MODEL,
-        image: imageFiles,
-        prompt,
-        size,
-      });
-    }
-
-    return this.client.images.generate({
-      model: IMAGE_MODEL,
-      prompt: options.prompt,
-      size,
-    });
-  }
-
-  private resolveImageSize(
-    aspectRatio: ImageAspectRatio,
-    imageSize: ImageResolution,
-  ) {
-    const [widthRatio, heightRatio] = IMAGE_ASPECT_RATIOS[aspectRatio];
-    const targetEdge = IMAGE_SHORT_EDGE_BY_RESOLUTION[imageSize];
-    const scale =
-      imageSize === "4K"
-        ? targetEdge / Math.max(widthRatio, heightRatio)
-        : targetEdge / Math.min(widthRatio, heightRatio);
-
-    return this.fitImageSize(widthRatio * scale, heightRatio * scale);
-  }
-
-  private fitImageSize(width: number, height: number) {
-    const edgeScale = MAX_IMAGE_EDGE / Math.max(width, height);
-    const pixelScale = Math.sqrt(MAX_IMAGE_PIXELS / (width * height));
-    const scale = Math.min(1, edgeScale, pixelScale);
-    const finalWidth = this.floorToImageMultiple(width * scale);
-    const finalHeight = this.floorToImageMultiple(height * scale);
-    return `${finalWidth}x${finalHeight}`;
-  }
-
-  private floorToImageMultiple(value: number) {
-    return Math.floor(value / 16) * 16;
-  }
-
-  private extensionForMimeType(mimeType: string) {
-    switch (mimeType) {
-      case "image/jpeg":
-        return "jpg";
-      case "image/png":
-        return "png";
-      case "image/webp":
-        return "webp";
-      default:
-        throw new Error(`Unsupported reference image MIME type: ${mimeType}`);
-    }
   }
 
   private extractText(response: OpenAI.Responses.Response) {

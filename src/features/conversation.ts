@@ -110,6 +110,7 @@ export class ConversationFeature implements Feature {
 
     this.agent = new Agent(
       context.openai,
+      context.gemini,
       context.memory,
       context.scrapbook,
       this.entityResolver,

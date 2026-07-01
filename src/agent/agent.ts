@@ -8,6 +8,7 @@ import type {
   ToolMessage,
   OpenAIClient,
 } from "../openai/client";
+import type { GeminiClient } from "../gemini/client";
 import type { HonchoMemoryService } from "../memory/service";
 import type { ScrapbookService } from "../scrapbook/service";
 import type { SupabaseClient } from "../supabase/client";
@@ -15,7 +16,7 @@ import type { EntityResolver } from "../utils/entity-resolver";
 import type { DiscordAdapter } from "../adapters/discord";
 import type { AgentContext, AgentResponse } from "./types";
 import {
-  processGifEmojiGrid,
+  processVideoToGif,
   buildGifPrompt,
 } from "../utils/image-processing";
 import { DEFAULT_GIF_OPTIONS } from "../utils/emoji-generator";
@@ -179,6 +180,7 @@ interface ToolExecutionContext {
 export class Agent {
   constructor(
     private readonly openai: OpenAIClient,
+    private readonly gemini: GeminiClient,
     private readonly memory: HonchoMemoryService,
     private readonly scrapbook: ScrapbookService,
     private readonly entityResolver: EntityResolver,
@@ -655,14 +657,81 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         }
 
         if (isGif) {
-          const gridSize = Math.sqrt(DEFAULT_GIF_OPTIONS.frames);
-          effectivePrompt = buildGifPrompt(effectivePrompt, gridSize, false);
+          effectivePrompt = buildGifPrompt(effectivePrompt, false);
         }
 
         const placeholderMessage = await this.adapter.sendPlaceholderMessage(
           channelId,
           prompt,
         );
+
+        let resultMessage = "";
+
+        if (isGif) {
+          const videoOptions: Parameters<typeof this.gemini.generateVideo>[0] = {
+            prompt: effectivePrompt,
+            aspectRatio: "1:1",
+          };
+          if (referenceImages.length > 0) {
+            videoOptions.referenceImages = referenceImages;
+          }
+
+          const videoResult = await this.gemini.generateVideo(videoOptions);
+
+          await videoResult.match(
+            async ({ buffer }) => {
+              try {
+                const finalBuffer = await processVideoToGif(
+                  buffer,
+                  DEFAULT_GIF_OPTIONS,
+                  512,
+                );
+
+                if (placeholderMessage) {
+                  const editResult = await this.adapter.editMessageWithImage(
+                    channelId,
+                    placeholderMessage.messageId,
+                    finalBuffer,
+                    "samebot-image.gif",
+                    prompt,
+                  );
+                  if (editResult.success) {
+                    resultMessage = `Successfully generated and sent GIF for: ${prompt}`;
+                  } else {
+                    this.logger.error(
+                      { prompt },
+                      "Failed to edit placeholder with GIF",
+                    );
+                    resultMessage = `Generated GIF but failed to send: ${editResult.error}`;
+                  }
+                }
+              } catch (error) {
+                this.logger.error({ err: error }, "Failed to process GIF");
+                if (placeholderMessage) {
+                  await this.adapter.editMessage(
+                    channelId,
+                    placeholderMessage.messageId,
+                    `failed to process GIF: ${error instanceof Error ? error.message : "unknown error"}`,
+                  );
+                }
+                resultMessage = `Failed to process GIF: ${error instanceof Error ? error.message : "unknown error"}`;
+              }
+            },
+            (error) => {
+              this.logger.error({ err: error }, "GIF video generation failed");
+              if (placeholderMessage) {
+                void this.adapter.editMessage(
+                  channelId,
+                  placeholderMessage.messageId,
+                  `failed to generate GIF: ${error.message}`,
+                );
+              }
+              resultMessage = `Failed to generate GIF: ${error.message}`;
+            },
+          );
+
+          return resultMessage;
+        }
 
         const imageOptions: {
           prompt: string;
@@ -689,31 +758,12 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         if (imageSize !== undefined) {
           imageOptions.imageSize = imageSize;
         }
-        const imageResult = await this.openai.generateImage(imageOptions);
+        const imageResult = await this.gemini.generateImage(imageOptions);
 
-        let resultMessage = "";
         await imageResult.match(
           async ({ buffer }) => {
-            let finalBuffer = buffer;
-            const fileExtension = isGif ? "gif" : "png";
-            const fileName = `samebot-image.${fileExtension}`;
-
-            if (isGif) {
-              try {
-                finalBuffer = await processGifEmojiGrid(buffer, DEFAULT_GIF_OPTIONS);
-              } catch (error) {
-                this.logger.error({ err: error }, "Failed to process GIF");
-                if (placeholderMessage) {
-                  await this.adapter.editMessage(
-                    channelId,
-                    placeholderMessage.messageId,
-                    `failed to process GIF: ${error instanceof Error ? error.message : "unknown error"}`,
-                  );
-                }
-                resultMessage = `Failed to process GIF: ${error instanceof Error ? error.message : "unknown error"}`;
-                return;
-              }
-            }
+            const finalBuffer = buffer;
+            const fileName = "samebot-image.png";
 
             if (placeholderMessage) {
               const editResult = await this.adapter.editMessageWithImage(
@@ -724,46 +774,20 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
                 prompt,
               );
               if (editResult.success) {
-                resultMessage = `Successfully generated and sent ${isGif ? "GIF" : "image"} for: ${prompt}`;
+                resultMessage = `Successfully generated and sent image for: ${prompt}`;
               } else {
                 this.logger.error(
-                  { err: editResult.error },
-                  "Failed to edit message with image",
+                  { prompt },
+                  "Failed to edit placeholder with image",
                 );
-                const sendResult = await this.adapter.sendImage(
-                  channelId,
-                  finalBuffer,
-                  fileName,
-                  prompt,
-                );
-                if (sendResult.success) {
-                  resultMessage = `Successfully generated and sent ${isGif ? "GIF" : "image"} for: ${prompt}`;
-                } else {
-                  resultMessage = `Generated ${isGif ? "GIF" : "image"} but failed to send it`;
-                }
-              }
-            } else {
-              const sendResult = await this.adapter.sendImage(
-                channelId,
-                finalBuffer,
-                fileName,
-                prompt,
-              );
-              if (sendResult.success) {
-                resultMessage = `Successfully generated and sent ${isGif ? "GIF" : "image"} for: ${prompt}`;
-              } else {
-                this.logger.error(
-                  { err: sendResult.error },
-                  "Failed to send image",
-                );
-                resultMessage = `Generated ${isGif ? "GIF" : "image"} but failed to send it`;
+                resultMessage = `Generated image but failed to send: ${editResult.error}`;
               }
             }
           },
-          async (error) => {
+          (error) => {
             this.logger.error({ err: error }, "Image generation failed");
             if (placeholderMessage) {
-              await this.adapter.editMessage(
+              void this.adapter.editMessage(
                 channelId,
                 placeholderMessage.messageId,
                 `failed to generate image: ${error.message}`,
@@ -772,6 +796,7 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
             resultMessage = `Failed to generate image: ${error.message}`;
           },
         );
+
         return resultMessage;
       }
 
@@ -799,14 +824,14 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
 
           const imagePromptResult = await this.generateImageForScrapbookMemory(memory);
           if (imagePromptResult) {
-            const imageOptions: Parameters<typeof this.openai.generateImage>[0] = {
+            const imageOptions: Parameters<typeof this.gemini.generateImage>[0] = {
               prompt: imagePromptResult.textPrompt,
               aspectRatio: "16:9",
             };
             if (imagePromptResult.referenceImages) {
               imageOptions.referenceImages = imagePromptResult.referenceImages;
             }
-            const imageResult = await this.openai.generateImage(imageOptions);
+            const imageResult = await this.gemini.generateImage(imageOptions);
 
             await imageResult.match(
               async ({ buffer }) => {
@@ -841,14 +866,14 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
           for (const memory of results) {
             const imagePromptResult = await this.generateImageForScrapbookMemory(memory);
             if (imagePromptResult) {
-              const imageOptions: Parameters<typeof this.openai.generateImage>[0] = {
+              const imageOptions: Parameters<typeof this.gemini.generateImage>[0] = {
                 prompt: imagePromptResult.textPrompt,
                 aspectRatio: "16:9",
               };
               if (imagePromptResult.referenceImages) {
                 imageOptions.referenceImages = imagePromptResult.referenceImages;
               }
-              const imageResult = await this.openai.generateImage(imageOptions);
+              const imageResult = await this.gemini.generateImage(imageOptions);
 
               await imageResult.match(
                 async ({ buffer }) => {

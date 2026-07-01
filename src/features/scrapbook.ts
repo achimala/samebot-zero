@@ -184,14 +184,14 @@ export class ScrapbookFeature implements Feature {
 
     const imagePromptResult = await this.generateImagePromptForMemory(memory);
     if (imagePromptResult) {
-      const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+      const imageOptions: Parameters<typeof this.ctx.gemini.generateImage>[0] = {
         prompt: imagePromptResult.textPrompt,
         aspectRatio: "16:9",
       };
       if (imagePromptResult.referenceImages) {
         imageOptions.referenceImages = imagePromptResult.referenceImages;
       }
-      const imageResult = await this.ctx.openai.generateImage(imageOptions);
+      const imageResult = await this.ctx.gemini.generateImage(imageOptions);
 
       await imageResult.match(
         async ({ buffer }) => {
@@ -357,14 +357,14 @@ export class ScrapbookFeature implements Feature {
         : [previousImageAsReference];
     }
 
-    const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+    const imageOptions: Parameters<typeof this.ctx.gemini.generateImage>[0] = {
       prompt: effectivePrompt,
       referenceImages,
       baseImageCount: 1,
       aspectRatio: "16:9",
     };
 
-    const result = await this.ctx.openai.generateImage(imageOptions);
+    const result = await this.ctx.gemini.generateImage(imageOptions);
     await result.match(
       async ({ buffer }) => {
         const promptChain = [...imageData.promptChain, newPrompt];
