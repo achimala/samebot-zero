@@ -11,7 +11,7 @@ import {
 import type { RuntimeContext } from "../core/runtime";
 import {
   processEmojiImage,
-  processGifEmojiGrid,
+  processVideoToGif,
   buildGifPrompt,
   type GifOptions,
 } from "./image-processing";
@@ -91,7 +91,7 @@ export class EmojiGenerator {
           return result.value;
         })();
 
-    const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+    const imageOptions: Parameters<typeof this.ctx.gemini.generateImage>[0] = {
       prompt: `${effectivePrompt}, solid bright magenta background (#FF00FF), suitable as a Discord emoji. Will be displayed very small, so make things clear and avoid fine details or small text`,
       aspectRatio: "1:1",
       imageSize: "1K",
@@ -100,7 +100,7 @@ export class EmojiGenerator {
       imageOptions.referenceImages = effectiveReferenceImages;
       imageOptions.baseImageCount = baseImageCount;
     }
-    const imagePromise = this.ctx.openai.generateImage(imageOptions);
+    const imagePromise = this.ctx.gemini.generateImage(imageOptions);
 
     const [emojiName, imageResult] = await Promise.all([
       namePromise,
@@ -141,6 +141,7 @@ export class EmojiGenerator {
     customName?: string,
     gifOptions: GifOptions = DEFAULT_GIF_OPTIONS,
     baseImageCount: number = 0,
+    targetSize: number = 128,
   ): Promise<EmojiPreview | null> {
     let effectivePrompt = prompt;
     let effectiveReferenceImages = referenceImages;
@@ -168,40 +169,37 @@ export class EmojiGenerator {
           return result.value;
         })();
 
-    const gridSize = Math.sqrt(gifOptions.frames);
-    const gifPrompt = buildGifPrompt(effectivePrompt, gridSize, true);
-    const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+    const gifPrompt = buildGifPrompt(effectivePrompt, true);
+    const videoOptions: Parameters<typeof this.ctx.gemini.generateVideo>[0] = {
       prompt: gifPrompt,
       aspectRatio: "1:1",
-      imageSize: "1K",
     };
     if (effectiveReferenceImages && effectiveReferenceImages.length > 0) {
-      imageOptions.referenceImages = effectiveReferenceImages;
-      imageOptions.baseImageCount = baseImageCount;
+      videoOptions.referenceImages = effectiveReferenceImages;
     }
-    const imagePromise = this.ctx.openai.generateImage(imageOptions);
+    const videoPromise = this.ctx.gemini.generateVideo(videoOptions);
 
-    const [emojiName, imageResult] = await Promise.all([
+    const [emojiName, videoResult] = await Promise.all([
       namePromise,
-      imagePromise,
+      videoPromise,
     ]);
 
     if (!emojiName) {
       return null;
     }
 
-    if (imageResult.isErr()) {
+    if (videoResult.isErr()) {
       this.ctx.logger.error(
-        { err: imageResult.error },
-        "GIF image generation failed",
+        { err: videoResult.error },
+        "GIF video generation failed",
       );
       return null;
     }
 
-    const { buffer } = imageResult.value;
+    const { buffer } = videoResult.value;
 
     try {
-      const gifBuffer = await processGifEmojiGrid(buffer, gifOptions);
+      const gifBuffer = await processVideoToGif(buffer, gifOptions, targetSize);
       return {
         name: emojiName,
         buffer: gifBuffer,
@@ -371,7 +369,7 @@ export class EmojiGenerator {
           type: 4,
           custom_id: "gif-settings",
           style: 1,
-          placeholder: "e.g. 9,5,0 (frames must be 4,9,16,25)",
+          placeholder: "e.g. 9,5,0 (frames, fps, loop_delay)",
           required: true,
           max_length: 20,
           value: `${gifOptions.frames},${gifOptions.fps},${gifOptions.loopDelay}`,

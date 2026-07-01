@@ -150,14 +150,14 @@ export class ImageOfDayFeature implements Feature {
           }
 
           const imageOptions: Parameters<
-            typeof this.ctx.openai.generateImage
+            typeof this.ctx.gemini.generateImage
           >[0] = {
             prompt: effectivePrompt,
           };
           if (referenceImages) {
             imageOptions.referenceImages = referenceImages;
           }
-          const imageResult = await this.ctx.openai.generateImage(imageOptions);
+          const imageResult = await this.ctx.gemini.generateImage(imageOptions);
           await imageResult.match(
             async ({ buffer }) => {
               await this.ctx.messenger

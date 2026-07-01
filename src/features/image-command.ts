@@ -66,13 +66,13 @@ export class ImageCommandFeature implements Feature {
       referenceImages = built.referenceImages;
     }
 
-    const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+    const imageOptions: Parameters<typeof this.ctx.gemini.generateImage>[0] = {
       prompt: effectivePrompt,
     };
     if (referenceImages) {
       imageOptions.referenceImages = referenceImages;
     }
-    const result = await this.ctx.openai.generateImage(imageOptions);
+    const result = await this.ctx.gemini.generateImage(imageOptions);
     await result.match(
       async ({ buffer }) => {
         const promptChain = [prompt];
@@ -208,13 +208,13 @@ export class ImageCommandFeature implements Feature {
         : [previousImageAsReference];
     }
 
-    const imageOptions: Parameters<typeof this.ctx.openai.generateImage>[0] = {
+    const imageOptions: Parameters<typeof this.ctx.gemini.generateImage>[0] = {
       prompt: effectivePrompt,
       referenceImages,
       baseImageCount: 1,
     };
 
-    const result = await this.ctx.openai.generateImage(imageOptions);
+    const result = await this.ctx.gemini.generateImage(imageOptions);
     await result.match(
       async ({ buffer }) => {
         const promptChain = [...imageData.promptChain, newPrompt];

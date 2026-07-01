@@ -3,7 +3,7 @@ import { SlashCommandBuilder } from "discord.js";
 export const commandDefinitions = [
   new SlashCommandBuilder()
     .setName("img")
-    .setDescription("Generate an image with GPT Image")
+    .setDescription("Generate an image with Nano Banana 2 Lite")
     .addStringOption((option) =>
       option
         .setName("prompt")
@@ -70,7 +70,7 @@ export const commandDefinitions = [
     .addIntegerOption((option) =>
       option
         .setName("frames")
-        .setDescription("Number of frames (must be perfect square: 4, 9, 16, 25). Default: 9")
+        .setDescription("Number of frames to sample from the video. Default: 9")
         .setRequired(false)
         .addChoices(
           { name: "4 (2x2)", value: 4 },
@@ -113,7 +113,7 @@ export const commandDefinitions = [
     .addIntegerOption((option) =>
       option
         .setName("frames")
-        .setDescription("Number of frames (must be perfect square: 4, 9, 16, 25). Default: 9")
+        .setDescription("Number of frames to sample from the video. Default: 9")
         .setRequired(false)
         .addChoices(
           { name: "4 (2x2)", value: 4 },

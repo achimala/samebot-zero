@@ -55,6 +55,8 @@ export class GifCommandFeature implements Feature {
       referenceImages,
       undefined,
       gifOptions,
+      0,
+      512,
     );
 
     if (!preview) {

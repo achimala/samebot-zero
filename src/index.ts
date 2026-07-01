@@ -5,6 +5,7 @@ import { createLogger } from "./core/logger";
 import { DiscordGateway } from "./discord/gateway";
 import { DiscordMessenger } from "./discord/messenger";
 import { OpenAIClient } from "./openai/client";
+import { GeminiClient } from "./gemini/client";
 import { SupabaseClient } from "./supabase/client";
 import type { Feature } from "./core/runtime";
 import { ConversationFeature } from "./features/conversation";
@@ -33,6 +34,7 @@ async function main() {
   );
   const messenger = new DiscordMessenger(gateway.client, logger);
   const openai = new OpenAIClient(config, logger);
+  const gemini = new GeminiClient(config, logger);
   const supabase = new SupabaseClient(config, logger);
 
   const memoryService = new HonchoMemoryService(config, logger);
@@ -51,6 +53,7 @@ async function main() {
     discord: gateway.client,
     messenger,
     openai,
+    gemini,
     supabase,
     memory: memoryService,
     scrapbook: scrapbookService,
