@@ -13,6 +13,7 @@ import {
   processEmojiImage,
   processVideoToGif,
   buildGifPrompt,
+  buildVideoPrompt,
   type GifOptions,
 } from "./image-processing";
 import { EntityResolver } from "./entity-resolver";
@@ -31,8 +32,8 @@ export interface GeneratedEmoji {
 export type { GifOptions };
 
 export const DEFAULT_GIF_OPTIONS: GifOptions = {
-  frames: 9,
-  fps: 5,
+  frames: 25,
+  fps: 12,
   loopDelay: 0,
 };
 
@@ -133,6 +134,45 @@ export class EmojiGenerator {
       this.ctx.logger.error({ err: error }, "Failed to process emoji image");
       return null;
     }
+  }
+
+  async generateVideo(
+    prompt: string,
+    referenceImages?: ReferenceImage[],
+    aspectRatio: "16:9" | "9:16" = "16:9",
+  ): Promise<Buffer | null> {
+    let effectivePrompt = prompt;
+    let effectiveReferenceImages = referenceImages;
+
+    if (!referenceImages || referenceImages.length === 0) {
+      const resolution = await this.entityResolver.resolve(prompt);
+      if (resolution) {
+        const built = this.entityResolver.buildPromptWithReferences(resolution);
+        effectivePrompt = built.textPrompt;
+        effectiveReferenceImages = built.referenceImages;
+      }
+    }
+
+    const videoPrompt = buildVideoPrompt(effectivePrompt);
+    const videoOptions: Parameters<typeof this.ctx.gemini.generateVideo>[0] = {
+      prompt: videoPrompt,
+      aspectRatio,
+    };
+    if (effectiveReferenceImages && effectiveReferenceImages.length > 0) {
+      videoOptions.referenceImages = effectiveReferenceImages;
+    }
+
+    const videoResult = await this.ctx.gemini.generateVideo(videoOptions);
+
+    if (videoResult.isErr()) {
+      this.ctx.logger.error(
+        { err: videoResult.error },
+        "Video generation failed",
+      );
+      return null;
+    }
+
+    return videoResult.value.buffer;
   }
 
   async generateGifPreview(

@@ -139,9 +139,22 @@ export function buildGifPrompt(
   return parts.join(" ");
 }
 
+export function buildVideoPrompt(prompt: string): string {
+  const parts: string[] = [
+    prompt,
+    "In a single unbroken scene with no scene cuts.",
+    "Smooth continuous animation.",
+    "No dialogue. No sound effects.",
+  ];
+
+  return parts.join(" ");
+}
+
+const MAGENTA_COLORKEY_FILTER = "colorkey=0xFF00FF:0.35:0.08";
+
 export async function processVideoToGif(
   videoBuffer: Buffer,
-  options: GifOptions = { frames: 9, fps: 5, loopDelay: 0 },
+  options: GifOptions = { frames: 25, fps: 12, loopDelay: 0 },
   targetSize: number = 128,
 ): Promise<Buffer> {
   const tempDirectory = await mkdtemp(join(tmpdir(), "samebot-gif-"));
@@ -153,16 +166,20 @@ export async function processVideoToGif(
     await mkdir(framesDirectory, { recursive: true });
 
     const durationSeconds = await getVideoDurationSeconds(videoPath);
-    const extractionFrameRate = options.frames / durationSeconds;
+    const frameCount = Math.min(
+      options.frames,
+      Math.ceil(durationSeconds * options.fps),
+    );
+    const extractionFrameRate = frameCount / durationSeconds;
 
     await runCommand("ffmpeg", [
       "-y",
       "-i",
       videoPath,
       "-vf",
-      `fps=${extractionFrameRate},scale=${targetSize}:${targetSize}:force_original_aspect_ratio=decrease,pad=${targetSize}:${targetSize}:(ow-iw)/2:(oh-ih)/2:color=0xFF00FF`,
+      `fps=${extractionFrameRate},scale=${targetSize}:${targetSize}:force_original_aspect_ratio=decrease,pad=${targetSize}:${targetSize}:(ow-iw)/2:(oh-ih)/2:color=0xFF00FF,${MAGENTA_COLORKEY_FILTER}`,
       "-frames:v",
-      String(options.frames),
+      String(frameCount),
       join(framesDirectory, "frame_%03d.png"),
     ]);
 
@@ -177,7 +194,7 @@ export async function processVideoToGif(
     const processedFrames: Uint8Array[] = [];
     for (const fileName of frameFileNames) {
       const frameBuffer = await readFile(join(framesDirectory, fileName));
-      processedFrames.push(await chromaKeyGifFrame(frameBuffer));
+      processedFrames.push(await readTransparentGifFrame(frameBuffer));
     }
 
     return encodeGif(processedFrames, options, targetSize);
@@ -186,8 +203,8 @@ export async function processVideoToGif(
   }
 }
 
-async function chromaKeyGifFrame(frameBuffer: Buffer): Promise<Uint8Array> {
-  const { data, info } = await sharp(frameBuffer)
+async function readTransparentGifFrame(frameBuffer: Buffer): Promise<Uint8Array> {
+  const { data } = await sharp(frameBuffer)
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
@@ -195,23 +212,13 @@ async function chromaKeyGifFrame(frameBuffer: Buffer): Promise<Uint8Array> {
   const pixels = new Uint8Array(data);
 
   for (let index = 0; index < pixels.length; index += 4) {
-    const red = pixels[index] ?? 0;
-    const green = pixels[index + 1] ?? 0;
-    const blue = pixels[index + 2] ?? 0;
+    const alpha = pixels[index + 3] ?? 255;
 
-    const magentaScore = calculateMagentaScore(red, green, blue);
-
-    if (magentaScore > 0.5) {
+    if (alpha < 128) {
       pixels[index] = 1;
       pixels[index + 1] = 1;
       pixels[index + 2] = 1;
       pixels[index + 3] = 0;
-    } else if (magentaScore > 0.1) {
-      const despilled = despillMagenta(red, green, blue, magentaScore);
-      pixels[index] = despilled.red;
-      pixels[index + 1] = despilled.green;
-      pixels[index + 2] = despilled.blue;
-      pixels[index + 3] = 255;
     } else {
       pixels[index + 3] = 255;
     }
