@@ -2,6 +2,10 @@ import { DateTime } from "luxon";
 import { z } from "zod";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import { EntityResolver } from "../utils/entity-resolver";
+import {
+  IMAGE_ENTITY_CONTEXT,
+  IMAGE_OF_DAY_SYSTEM_BASE,
+} from "../utils/image-prompt-instructions";
 
 const ZONE = "America/Los_Angeles";
 
@@ -64,7 +68,7 @@ export class ImageOfDayFeature implements Feature {
       const availableEntities = await this.ctx.supabase.listEntityFolders();
       const entityContext =
         availableEntities.length > 0
-          ? `\n\nYou can feature these people/entities in your meme (we have reference images for them): ${availableEntities.join(", ")}. Feel free to include them by name in your prompt if it would make the meme funnier. Note: These reference images are used as references for generation, not as images to be directly pasted into the output.`
+          ? `\n\n${IMAGE_ENTITY_CONTEXT.replace("{entities}", availableEntities.join(", "))}`
           : "";
 
       let conversationContext = "";
@@ -90,8 +94,8 @@ export class ImageOfDayFeature implements Feature {
       }
 
       const systemPrompt = hasLittleConversation
-        ? `Create a JSON object with 'prompt' and 'caption' for a fun, creative meme or story. Since there's little recent conversation, feel free to make up something entertaining and humorous - it could be a random funny scenario, a silly story, or an absurd meme. Be creative!${entityContext}`
-        : `Create a JSON object with 'prompt' and 'caption' for a humorous meme referencing the given date.${entityContext}${conversationContext}`;
+        ? `${IMAGE_OF_DAY_SYSTEM_BASE} Since there's little recent conversation, invent something entertaining — but still one focused idea, not a pile of random elements.${entityContext}`
+        : `${IMAGE_OF_DAY_SYSTEM_BASE} Reference the given date and recent conversation, but distill it into one clear visual joke.${entityContext}${conversationContext}`;
 
       const userPrompt = hasLittleConversation
         ? `Date: ${today}. Create something fun and entertaining - make up your own funny meme or story! Keep caption under 120 characters.`
