@@ -172,7 +172,6 @@ export class EmojiGenerator {
     const gifPrompt = buildGifPrompt(effectivePrompt, true);
     const videoOptions: Parameters<typeof this.ctx.gemini.generateVideo>[0] = {
       prompt: gifPrompt,
-      aspectRatio: "1:1",
     };
     if (effectiveReferenceImages && effectiveReferenceImages.length > 0) {
       videoOptions.referenceImages = effectiveReferenceImages;

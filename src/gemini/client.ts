@@ -34,7 +34,7 @@ export type GenerateImageOptions = {
 export type GenerateGifOptions = {
   prompt: string;
   referenceImages?: Array<{ data: string; mimeType: string }>;
-  aspectRatio?: "1:1" | "16:9" | "9:16";
+  aspectRatio?: "16:9" | "9:16";
 };
 
 export class GeminiClient {
@@ -131,9 +131,8 @@ export class GeminiClient {
   }
 
   private async createVideo(options: GenerateGifOptions): Promise<Buffer | null> {
-    const aspectRatio = options.aspectRatio ?? "1:1";
-    const hasReferenceImages =
-      options.referenceImages !== undefined && options.referenceImages.length > 0;
+    const aspectRatio = options.aspectRatio ?? "16:9";
+    const referenceImageCount = options.referenceImages?.length ?? 0;
 
     const input = this.buildVideoInput(options.prompt, options.referenceImages);
 
@@ -144,10 +143,13 @@ export class GeminiClient {
         type: "video",
         aspect_ratio: aspectRatio,
       },
-      generation_config: hasReferenceImages
+      generation_config: referenceImageCount > 0
         ? {
             video_config: {
-              task: "image_to_video",
+              task:
+                referenceImageCount === 1
+                  ? "image_to_video"
+                  : "reference_to_video",
             },
           }
         : undefined,

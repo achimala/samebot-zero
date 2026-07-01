@@ -670,7 +670,6 @@ ${contextWithIds.references.map((ref) => `- ${ref.id}: ${ref.role}${ref.author ?
         if (isGif) {
           const videoOptions: Parameters<typeof this.gemini.generateVideo>[0] = {
             prompt: effectivePrompt,
-            aspectRatio: "1:1",
           };
           if (referenceImages.length > 0) {
             videoOptions.referenceImages = referenceImages;
