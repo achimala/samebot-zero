@@ -86,7 +86,11 @@ export class OpenAIClient {
     } as OpenAI.Responses.ResponseInputItem;
   }
 
-  chat(options: { messages: ChatMessage[]; allowSearch?: boolean }) {
+  chat(options: {
+    messages: ChatMessage[];
+    allowSearch?: boolean;
+    preserveWhitespace?: boolean;
+  }) {
     const input: OpenAI.Responses.ResponseInput = options.messages.map(
       (message) => this.formatMessageForInput(message),
     );
@@ -115,7 +119,11 @@ export class OpenAIClient {
         );
       },
     ).andThen((response) => {
-      const text = this.extractText(response);
+      const extractOptions =
+        options.preserveWhitespace === true
+          ? { preserveWhitespace: true as const }
+          : undefined;
+      const text = this.extractText(response, extractOptions);
       this.logger.debug(
         {
           model: params.model,
@@ -126,6 +134,9 @@ export class OpenAIClient {
       );
       if (!text) {
         return err<never, BotError>(Errors.openai("OpenAI returned no text"));
+      }
+      if (options.preserveWhitespace) {
+        return ok(text);
       }
       return ok(text.trim());
     });
@@ -346,7 +357,10 @@ export class OpenAIClient {
     });
   }
 
-  private extractText(response: OpenAI.Responses.Response) {
+  private extractText(
+    response: OpenAI.Responses.Response,
+    options?: { preserveWhitespace?: boolean },
+  ) {
     const chunks: string[] = [];
     for (const entry of response.output) {
       if (entry.type === "message") {
@@ -357,10 +371,13 @@ export class OpenAIClient {
         }
       }
     }
-    const combined = chunks.join("\n").trim();
-    if (combined.length > 0) {
+    const combined = chunks.join("\n");
+    if (combined.length === 0) {
+      return null;
+    }
+    if (options?.preserveWhitespace) {
       return combined;
     }
-    return null;
+    return combined.trim();
   }
 }

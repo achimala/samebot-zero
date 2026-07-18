@@ -56,6 +56,7 @@ export class ConversationFeature implements Feature {
       systemMessage: string;
       userMessage: string;
       allowSearch?: boolean;
+      preserveWhitespace?: boolean;
     },
   ) {
     const context = this.getContext(channelId);
@@ -66,6 +67,7 @@ export class ConversationFeature implements Feature {
           content: string;
         }>;
         allowSearch?: boolean;
+        preserveWhitespace?: boolean;
       } = {
         messages: [
           { role: "system", content: options.systemMessage },
@@ -74,6 +76,9 @@ export class ConversationFeature implements Feature {
       };
       if (options.allowSearch !== undefined) {
         chatOptions.allowSearch = options.allowSearch;
+      }
+      if (options.preserveWhitespace !== undefined) {
+        chatOptions.preserveWhitespace = options.preserveWhitespace;
       }
       return this.ctx.openai.chat(chatOptions);
     }
