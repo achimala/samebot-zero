@@ -411,6 +411,7 @@ If appropriate, provide a brief response (1-3 words max). Examples: "same", "sam
       systemMessage: string;
       userMessage: string;
       allowSearch?: boolean;
+      preserveWhitespace?: boolean;
     },
   ) {
     const messages: ChatMessage[] = [
@@ -430,11 +431,18 @@ If appropriate, provide a brief response (1-3 words max). Examples: "same", "sam
       role: "user",
       content: options.userMessage,
     });
-    const chatOptions: { messages: ChatMessage[]; allowSearch?: boolean } = {
+    const chatOptions: {
+      messages: ChatMessage[];
+      allowSearch?: boolean;
+      preserveWhitespace?: boolean;
+    } = {
       messages,
     };
     if (options.allowSearch !== undefined) {
       chatOptions.allowSearch = options.allowSearch;
+    }
+    if (options.preserveWhitespace !== undefined) {
+      chatOptions.preserveWhitespace = options.preserveWhitespace;
     }
     return this.openai.chat(chatOptions);
   }
