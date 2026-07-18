@@ -429,4 +429,123 @@ describe("EntityResolver", () => {
       expect(built.textPrompt).toContain("Image 2: likeness reference for tyrus");
     });
   });
+
+  describe("should handle compound words correctly", () => {
+    it("should match 'Darien' in prompt with 'superdarien' compound word", async () => {
+      const mockSupabase = createMockSupabaseClient(
+        ["darien", "cody"],
+        {
+          darien: [{ name: "darien1.jpg", id: "1" }],
+          cody: [{ name: "cody1.jpg", id: "2" }],
+        },
+      );
+      const resolver = new EntityResolver(mockSupabase, mockLogger);
+
+      const prompt =
+        "samebot draw Darien standing next to a superdarien which is 2x wider in each dimension, standing next to a long Darien who is 2x taller but same width and depth";
+
+      const result = await resolver.resolve(prompt);
+
+      expect(result).not.toBeNull();
+      expect(result?.entities).toHaveLength(1);
+      expect(result?.entities[0]?.name).toBe("darien");
+      const entityNames = result?.entities.map((e) => e.name);
+      expect(entityNames).not.toContain("cody");
+    });
+
+    it("should not match 'cody' when prompt contains 'darien'", async () => {
+      const mockSupabase = createMockSupabaseClient(
+        ["darien", "cody"],
+        {
+          darien: [{ name: "darien1.jpg", id: "1" }],
+          cody: [{ name: "cody1.jpg", id: "2" }],
+        },
+      );
+      const resolver = new EntityResolver(mockSupabase, mockLogger);
+
+      const prompt = "draw Darien standing next to a superdarien";
+
+      const result = await resolver.resolve(prompt);
+
+      if (result) {
+        const entityNames = result.entities.map((e) => e.name);
+        expect(entityNames).not.toContain("cody");
+        expect(entityNames).toContain("darien");
+      }
+    });
+
+    it("should not match 'superdarien' to 'cody' via fuzzy matching", async () => {
+      const mockSupabase = createMockSupabaseClient(
+        ["darien", "cody"],
+        {
+          darien: [{ name: "darien1.jpg", id: "1" }],
+          cody: [{ name: "cody1.jpg", id: "2" }],
+        },
+      );
+      const resolver = new EntityResolver(mockSupabase, mockLogger);
+
+      const prompt = "draw a superdarien";
+
+      const result = await resolver.resolve(prompt);
+
+      if (result) {
+        const entityNames = result.entities.map((e) => e.name);
+        expect(entityNames).not.toContain("cody");
+      }
+    });
+
+    it("should match 'darien' as substring in 'superdarien' compound word", async () => {
+      const mockSupabase = createMockSupabaseClient(
+        ["darien", "cody"],
+        {
+          darien: [{ name: "darien1.jpg", id: "1" }],
+          cody: [{ name: "cody1.jpg", id: "2" }],
+        },
+      );
+      const resolver = new EntityResolver(mockSupabase, mockLogger);
+
+      const prompt = "draw a superdarien";
+
+      const result = await resolver.resolve(prompt);
+
+      expect(result).not.toBeNull();
+      const entityNames = result?.entities.map((e) => e.name);
+      expect(entityNames).toContain("darien");
+      expect(entityNames).not.toContain("cody");
+    });
+
+    it("should prioritize exact 'darien' match over fuzzy 'cody' match", async () => {
+      const mockSupabase = createMockSupabaseClient(
+        ["darien", "cody"],
+        {
+          darien: [{ name: "darien1.jpg", id: "1" }],
+          cody: [{ name: "cody1.jpg", id: "2" }],
+        },
+      );
+      const resolver = new EntityResolver(mockSupabase, mockLogger);
+
+      const prompt = "draw Darien and a superdarien";
+
+      const result = await resolver.resolve(prompt);
+
+      expect(result).not.toBeNull();
+      const entityNames = result?.entities.map((e) => e.name).sort();
+      expect(entityNames).toEqual(["darien"]);
+      expect(entityNames).not.toContain("cody");
+    });
+
+    it("should not match entity name at start of word (to avoid typo matches)", async () => {
+      const mockSupabase = createMockSupabaseClient(
+        ["tyrus"],
+        { tyrus: [{ name: "tyrus1.jpg", id: "1" }] },
+      );
+      const resolver = new EntityResolver(mockSupabase, mockLogger);
+
+      const prompt = "draw a tyrusss";
+
+      const result = await resolver.resolve(prompt);
+
+      expect(result).toBeNull();
+    });
+  });
 });
