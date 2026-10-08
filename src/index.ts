@@ -88,7 +88,8 @@ async function main() {
 
   features.forEach((feature) => feature.register(runtime));
 
-  await deploymentLock.acquire();
+  const { previousRunCrashed } = await deploymentLock.acquire();
+  conversationFeature.setAnnounceStartup(previousRunCrashed);
   const shutdown = async (signal: NodeJS.Signals) => {
     logger.info({ signal }, "Shutting down Samebot");
     await gateway.client.destroy();

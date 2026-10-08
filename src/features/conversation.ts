@@ -37,8 +37,14 @@ export class ConversationFeature implements Feature {
   private adapter!: DiscordAdapter;
   private responseDecision!: ResponseDecision;
   private entityResolver!: EntityResolver;
+  /** Only announce a restart when the previous run crashed, not on deploys. */
+  private announceStartup = false;
   /** Per-channel promise chains so messages in a channel are handled in order. */
   private readonly channelQueues = new Map<string, Promise<void>>();
+
+  setAnnounceStartup(announce: boolean) {
+    this.announceStartup = announce;
+  }
 
   getContext(channelId: string): AgentContext | undefined {
     const context = this.contexts.get(channelId);
@@ -386,6 +392,9 @@ export class ConversationFeature implements Feature {
       this.contexts.set(mainChannelId, context);
       await this.backfillMessages(mainChannelId, context, undefined, 10);
 
+      if (!this.announceStartup) {
+        return;
+      }
       const mostRecent = context.history[context.history.length - 1];
       const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
       if (!mostRecent || mostRecent.timestamp < oneDayAgo) {
@@ -397,7 +406,7 @@ export class ConversationFeature implements Feature {
         {
           systemMessage: `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic British tone.\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
           userMessage:
-            "Generate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.",
+            "You just came back online after crashing unexpectedly. Write a brief message letting the channel know you're back. Keep it short and contextually relevant to the conversation.",
         },
       );
 

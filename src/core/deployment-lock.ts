@@ -24,7 +24,12 @@ export class DeploymentLock {
     private readonly logger: Logger,
   ) {}
 
-  async acquire() {
+  /**
+   * Blocks until this process holds the lock. Resolves with whether the
+   * previous holder died without releasing it (i.e. it crashed rather than
+   * shutting down cleanly).
+   */
+  async acquire(): Promise<{ previousRunCrashed: boolean }> {
     // Use a pool rather than one long-lived connection: the Supabase pooler
     // drops idle connections, and an idle pool client erroring is harmless.
     const pool = new Pool({
@@ -43,13 +48,19 @@ export class DeploymentLock {
     await this.ensureLockTable(pool);
     this.logger.info({ ownerId: this.ownerId }, "Waiting for Samebot deployment lock");
 
-    while (!(await this.tryAcquireSafely(pool))) {
+    let result = await this.tryAcquireSafely(pool);
+    while (!result.acquired) {
       await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+      result = await this.tryAcquireSafely(pool);
     }
 
     this.lastRenewedAt = Date.now();
     this.startHeartbeat();
-    this.logger.info({}, "Acquired Samebot deployment lock");
+    this.logger.info(
+      { previousRunCrashed: result.tookOverStaleLock },
+      "Acquired Samebot deployment lock",
+    );
+    return { previousRunCrashed: result.tookOverStaleLock };
   }
 
   async release() {
@@ -90,12 +101,14 @@ export class DeploymentLock {
       return await this.tryAcquire(pool);
     } catch (error) {
       this.logger.warn({ err: error }, "Samebot deployment lock acquire attempt failed; retrying");
-      return false;
+      return { acquired: false, tookOverStaleLock: false };
     }
   }
 
   private async tryAcquire(pool: Pool) {
-    const result = await pool.query<{ owner_id: string }>(
+    // A clean shutdown deletes the row, so acquiring by updating an existing
+    // row (`xmax <> 0`) means the previous holder died without releasing it.
+    const result = await pool.query<{ owner_id: string; inserted: boolean }>(
       `
         insert into public.samebot_runtime_locks (lock_name, owner_id, expires_at, updated_at)
         values ($1, $2, now() + ($3::text || ' milliseconds')::interval, now())
@@ -105,11 +118,13 @@ export class DeploymentLock {
             updated_at = now()
         where samebot_runtime_locks.owner_id = excluded.owner_id
            or samebot_runtime_locks.expires_at < now()
-        returning owner_id
+        returning owner_id, (xmax = 0) as inserted
       `,
       [SAMEBOT_DISCORD_LOCK_NAME, this.ownerId, LOCK_LEASE_MS],
     );
-    return result.rowCount === 1 && result.rows[0]?.owner_id === this.ownerId;
+    const row = result.rows[0];
+    const acquired = result.rowCount === 1 && row?.owner_id === this.ownerId;
+    return { acquired, tookOverStaleLock: acquired && row?.inserted === false };
   }
 
   private startHeartbeat() {
