@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
-import type { OpenAIClient } from "../openai/client";
+import type { ClaudeClient } from "../llm/claude";
+import type { DecisionClient } from "../llm/decisions";
 
 const APHORISM_CONVERSION_PROBABILITY = 0.02;
 const APHORISM_CONVERSION_PROBABILITY_ALL_CAPS = 0.2;
@@ -18,68 +19,40 @@ function isAllCaps(message: string): boolean {
 
 export async function shouldConvertToAphorism(
   message: string,
-  openai: OpenAIClient,
+  decisions: DecisionClient,
   logger: Logger,
 ): Promise<boolean> {
   const allCaps = isAllCaps(message);
   const probability = allCaps ? APHORISM_CONVERSION_PROBABILITY_ALL_CAPS : APHORISM_CONVERSION_PROBABILITY;
-  
+
   if (Math.random() >= probability) {
     return false;
   }
 
-  const systemMessage = `You are determining whether a user message is trivial or stupid (like "hi", "lol", "ok", etc.).
-
-Return true if the message is trivial/stupid and should be skipped.
-Return false if the message has substance and should be enhanced.`;
-
-  const decision = await openai.chatStructured<{
-    isTrivial: boolean;
-  }>({
-    model: "gpt-5.4-mini",
-    messages: [
-      {
-        role: "system",
-        content: systemMessage,
-      },
-      {
-        role: "user",
-        content: `Message to evaluate:\n${message}\n\nIs this message trivial or stupid?`,
-      },
-    ],
-    schema: {
-      type: "object",
-      properties: {
-        isTrivial: {
-          type: "boolean",
-          description: "Whether the message is trivial or stupid",
-        },
-      },
-      required: ["isTrivial"],
-      additionalProperties: false,
+  const decision = await decisions.decide(`Chat message: ${message}`, [
+    {
+      type: "predicate",
+      name: "has_substance",
+      instructions:
+        "Does this chat message have real substance (an idea, opinion, or statement), as opposed to being trivial filler like 'hi', 'lol', or 'ok'?",
     },
-    schemaName: "aphorismConversionDecision",
-    schemaDescription: "Decision on whether message is trivial",
-  });
+  ]);
 
   return decision.match(
-    (result) => {
-      const shouldEnhance = !result.isTrivial;
+    (answers) => {
+      const shouldEnhance = (answers.probability("has_substance") ?? 0) >= 0.5;
       if (shouldEnhance) {
         logger.debug({}, "Enhancing message to aphorism");
       }
       return shouldEnhance;
     },
-    (error) => {
-      logger.warn({ err: error }, "Failed to check if should convert to aphorism");
-      return false;
-    },
+    () => false,
   );
 }
 
 export async function convertToAphorism(
   message: string,
-  openai: OpenAIClient,
+  llm: ClaudeClient,
   logger: Logger,
 ): Promise<string | null> {
   const allCaps = isAllCaps(message);
@@ -103,7 +76,7 @@ Examples of the style:
 
 Convert the message while preserving its essential meaning and intent.`;
 
-  const result = await openai.chat({
+  const result = await llm.chat({
     messages: [
       {
         role: "system",

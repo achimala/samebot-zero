@@ -1,4 +1,5 @@
-import type { OpenAIClient } from "../openai/client";
+import { z } from "zod";
+import type { ClaudeClient } from "../llm/claude";
 import type { Logger } from "pino";
 import { EntityResolver } from "./entity-resolver";
 import { SCRAPBOOK_IMAGE_PROMPT_SYSTEM } from "./image-prompt-instructions";
@@ -10,7 +11,7 @@ export interface ScrapbookMemoryForImagePrompt {
 }
 
 export async function generateScrapbookImagePrompt(
-  openai: OpenAIClient,
+  llm: ClaudeClient,
   entityResolver: EntityResolver,
   memory: ScrapbookMemoryForImagePrompt,
   logger: Logger,
@@ -29,7 +30,8 @@ ${contextText}
 
 Key quote: "${memory.keyMessage}" - ${memory.author}`;
 
-  const result = await openai.chatStructured<{ prompt: string }>({
+  const result = await llm.chatStructured({
+    model: "sonnet",
     messages: [
       {
         role: "system",
@@ -40,19 +42,9 @@ Key quote: "${memory.keyMessage}" - ${memory.author}`;
         content: userPrompt,
       },
     ],
-    schema: {
-      type: "object",
-      properties: {
-        prompt: {
-          type: "string",
-          description: "The image generation prompt",
-        },
-      },
-      required: ["prompt"],
-      additionalProperties: false,
-    },
-    schemaName: "imagePrompt",
-    model: "gpt-5.4-mini",
+    schema: z.object({
+      prompt: z.string().describe("The image generation prompt"),
+    }),
   });
 
   if (!result.isOk()) {
@@ -75,6 +67,6 @@ Key quote: "${memory.keyMessage}" - ${memory.author}`;
 
   return {
     textPrompt,
-    referenceImages,
+    ...(referenceImages && { referenceImages }),
   };
 }

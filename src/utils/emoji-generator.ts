@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   ChannelType,
   ActionRowBuilder,
@@ -19,10 +20,6 @@ import {
 import { EntityResolver } from "./entity-resolver";
 
 const MAX_EMOJI_SLOTS = 50;
-
-interface EmojiNameResponse {
-  name: string;
-}
 
 export interface GeneratedEmoji {
   emoji: GuildEmoji;
@@ -551,8 +548,8 @@ export class EmojiGenerator {
   }
 
   generateEmojiName(prompt: string) {
-    return this.ctx.openai
-      .chatStructured<EmojiNameResponse>({
+    return this.ctx.llm
+      .chatStructured({
         messages: [
           {
             role: "system",
@@ -577,21 +574,14 @@ Return only the name, no explanation.`,
             content: prompt,
           },
         ],
-        schema: {
-          type: "object",
-          properties: {
-            name: {
-              type: "string",
-              description:
-                "The emoji name (2-32 chars, lowercase alphanumeric and underscores only, must start with a letter)",
-            },
-          },
-          required: ["name"],
-          additionalProperties: false,
-        },
-        schemaName: "emojiName",
-        schemaDescription: "Generated emoji name based on prompt",
-        model: "gpt-5.4-nano",
+        schema: z.object({
+          name: z
+            .string()
+            .describe(
+              "The emoji name (2-32 chars, lowercase alphanumeric and underscores only, must start with a letter)",
+            ),
+        }),
+        model: "haiku",
       })
       .map((response) => this.sanitizeEmojiName(response.name));
   }

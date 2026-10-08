@@ -1,12 +1,26 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type Interactions } from "@google/genai";
 import { ResultAsync, err, ok } from "neverthrow";
 import type { Logger } from "pino";
 import type { AppConfig } from "../core/config";
 import { Errors, type BotError } from "../core/errors";
 import { augmentPromptForReferenceImages } from "../utils/reference-image-prompt";
 
-const IMAGE_MODEL = "gemini-3.1-flash-lite-image";
-const VIDEO_MODEL = "gemini-omni-flash-preview";
+/**
+ * "fast" (~6s) is for interactive requests where someone is waiting;
+ * "best" (~16s) is for scheduled posts where quality matters more.
+ */
+const IMAGE_MODELS = {
+  fast: "gemini-3.1-flash-lite-image",
+  best: "gemini-nano-banana-2.1",
+} as const;
+const VIDEO_MODEL = "gemini-omni-1.1-flash";
+
+type InteractionInput = string | Array<Interactions.TextContent | Interactions.ImageContent>;
+type VideoInteraction = {
+  id: string;
+  status: string;
+  output_video?: { data?: string | undefined; uri?: string | undefined } | undefined;
+};
 
 const VIDEO_POLL_INTERVAL_MS = 5000;
 const VIDEO_POLL_MAX_ATTEMPTS = 120;
@@ -29,6 +43,7 @@ export type GenerateImageOptions = {
   baseImageCount?: number;
   aspectRatio?: ImageAspectRatio;
   imageSize?: ImageResolution;
+  quality?: keyof typeof IMAGE_MODELS;
 };
 
 export type GenerateGifOptions = {
@@ -90,21 +105,19 @@ export class GeminiClient {
     const prompt = this.buildImagePrompt(options);
 
     const interaction = await this.client.interactions.create({
-      model: IMAGE_MODEL,
+      model: IMAGE_MODELS[options.quality ?? "fast"],
       input: prompt,
       response_format: {
         type: "image",
         aspect_ratio: aspectRatio,
-        image_size: "1K",
+        image_size: options.imageSize ?? "1K",
       },
     });
 
     return this.extractImageBuffer(interaction.output_image);
   }
 
-  private buildImagePrompt(
-    options: GenerateImageOptions,
-  ): string | Array<{ type: string; text?: string; data?: string; mime_type?: string }> {
+  private buildImagePrompt(options: GenerateImageOptions): InteractionInput {
     if (!options.referenceImages || options.referenceImages.length === 0) {
       return options.prompt;
     }
@@ -115,7 +128,7 @@ export class GeminiClient {
       options.baseImageCount ?? 0,
     );
 
-    const input: Array<{ type: string; text?: string; data?: string; mime_type?: string }> = [
+    const input: Array<Interactions.TextContent | Interactions.ImageContent> = [
       { type: "text", text: prompt },
     ];
 
@@ -143,31 +156,33 @@ export class GeminiClient {
         type: "video",
         aspect_ratio: aspectRatio,
       },
-      generation_config: referenceImageCount > 0
-        ? {
-            video_config: {
-              task:
-                referenceImageCount === 1
-                  ? "image_to_video"
-                  : "reference_to_video",
-            },
-          }
-        : undefined,
+      ...(referenceImageCount > 0 && {
+        generation_config: {
+          video_config: {
+            task:
+              referenceImageCount === 1
+                ? "image_to_video"
+                : "reference_to_video",
+          },
+        },
+      }),
     });
 
-    const completedInteraction = await this.waitForCompletedInteraction(interaction);
+    const completedInteraction = await this.waitForCompletedInteraction(
+      interaction as VideoInteraction,
+    );
     return this.extractVideoBuffer(completedInteraction);
   }
 
   private buildVideoInput(
     prompt: string,
     referenceImages?: Array<{ data: string; mimeType: string }>,
-  ): string | Array<{ type: string; text?: string; data?: string; mime_type?: string }> {
+  ): InteractionInput {
     if (!referenceImages || referenceImages.length === 0) {
       return prompt;
     }
 
-    const input: Array<{ type: string; text?: string; data?: string; mime_type?: string }> = [];
+    const input: Array<Interactions.TextContent | Interactions.ImageContent> = [];
 
     for (const referenceImage of referenceImages) {
       input.push({
@@ -181,9 +196,7 @@ export class GeminiClient {
     return input;
   }
 
-  private async waitForCompletedInteraction(
-    interaction: { id: string; status: string; output_video?: { data?: string; uri?: string } },
-  ) {
+  private async waitForCompletedInteraction(interaction: VideoInteraction) {
     let currentInteraction = interaction;
 
     for (
@@ -195,7 +208,9 @@ export class GeminiClient {
       await new Promise((resolve) => {
         setTimeout(resolve, VIDEO_POLL_INTERVAL_MS);
       });
-      currentInteraction = await this.client.interactions.get(currentInteraction.id);
+      currentInteraction = (await this.client.interactions.get(
+        currentInteraction.id,
+      )) as VideoInteraction;
     }
 
     if (currentInteraction.status !== "completed") {
@@ -208,7 +223,7 @@ export class GeminiClient {
   }
 
   private extractImageBuffer(
-    outputImage: { data?: string } | undefined,
+    outputImage: { data?: string | undefined } | undefined,
   ): Buffer | null {
     if (!outputImage?.data) {
       return null;
@@ -217,7 +232,7 @@ export class GeminiClient {
   }
 
   private async extractVideoBuffer(
-    interaction: { output_video?: { data?: string; uri?: string } },
+    interaction: VideoInteraction,
   ): Promise<Buffer | null> {
     const outputVideo = interaction.output_video;
 

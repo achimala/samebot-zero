@@ -18,9 +18,11 @@ export interface StorageFile {
 }
 
 const ENTITY_REFERENCES_BUCKET = "reference-images";
+const ENTITY_FOLDERS_CACHE_TTL_MS = 5 * 60_000;
 
 export class SupabaseClient {
   private client: SupabaseClientType;
+  private entityFoldersCache: { value: string[]; expiresAt: number } | undefined;
 
   constructor(
     private readonly config: AppConfig,
@@ -99,7 +101,20 @@ export class SupabaseClient {
     }
   }
 
+  /** Cached briefly: this is read on every reply but rarely changes. */
   async listEntityFolders(): Promise<string[]> {
+    if (this.entityFoldersCache && this.entityFoldersCache.expiresAt > Date.now()) {
+      return this.entityFoldersCache.value;
+    }
+    const folders = await this.fetchEntityFolders();
+    this.entityFoldersCache = {
+      value: folders,
+      expiresAt: Date.now() + ENTITY_FOLDERS_CACHE_TTL_MS,
+    };
+    return folders;
+  }
+
+  private async fetchEntityFolders(): Promise<string[]> {
     try {
       const { data, error } = await this.client.storage
         .from(ENTITY_REFERENCES_BUCKET)

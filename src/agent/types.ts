@@ -1,5 +1,3 @@
-import type { ToolCall } from "../openai/client";
-
 export interface AgentMessage {
   id: string;
   role: "user" | "assistant";
@@ -7,6 +5,7 @@ export interface AgentMessage {
   authorId?: string;
   author?: string;
   timestamp: number;
+  /** Discord CDN URLs of attached images. */
   images?: string[];
 }
 
@@ -34,5 +33,4 @@ export type ToolResult =
 
 export interface AgentResponse {
   text: string | null;
-  toolCallsMade: ToolCall[];
 }

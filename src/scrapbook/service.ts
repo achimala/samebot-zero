@@ -1,6 +1,6 @@
 import type { Logger } from "pino";
 import type { ScrapbookStore, ScrapbookMemory, ContextMessage } from "./store";
-import type { OpenAIClient } from "../openai/client";
+import type { DecisionClient } from "../llm/decisions";
 
 const CONTEXT_WINDOW_SIZE = 20;
 
@@ -11,16 +11,16 @@ interface MessageWithId {
   timestamp: number;
 }
 
-interface DetectionResult {
-  keyMessageId: string | null;
-}
+const NO_KEY_MESSAGE = "none";
+const DETECTION_MAX_MESSAGES = 40;
+const DETECTION_MIN_CONFIDENCE = 0.7;
 
 export class ScrapbookService {
   private lastScrapbookTimestamp: number = 0;
 
   constructor(
     private readonly store: ScrapbookStore,
-    private readonly openai: OpenAIClient,
+    private readonly decisions: DecisionClient,
     private readonly logger: Logger,
   ) {}
 
@@ -29,52 +29,30 @@ export class ScrapbookService {
       return null;
     }
 
-    const systemMessage = `You analyze chat conversations to identify exceptionally memorable or quotable moments.
-
-Your task: Given a list of recent chat messages with IDs, determine if any single message stands out as particularly memorable, funny, profound, or quotable.
-
-Be VERY conservative. Most conversations have nothing worth saving. Only identify a key message if it's genuinely:
-- A hilarious or witty comment
-- An unexpectedly profound statement
-- A memorable inside joke moment
-- Something that would be fun to reminisce about later
-
-Return the message ID of the key message, or null if nothing stands out.
-Do NOT select messages that are:
-- Routine conversation
-- Questions without interesting answers
-- Generic statements
-- Bot messages`;
-
-    const messageList = messages
+    const candidates = messages.slice(-DETECTION_MAX_MESSAGES);
+    const messageList = candidates
       .map((m) => `[${m.id}] ${m.author}: ${m.content}`)
       .join("\n");
 
-    const result = await this.openai.chatStructured<DetectionResult>({
-      messages: [
-        { role: "system", content: systemMessage },
+    const result = await this.decisions.decide(
+      `Recent Discord chat messages, each prefixed with its ID:\n\n${messageList}`,
+      [
         {
-          role: "user",
-          content: `Analyze these messages and identify the most memorable one (if any):\n\n${messageList}`,
+          type: "choice",
+          name: "key_message",
+          instructions: `Is any single message exceptionally memorable or quotable: genuinely hilarious, unexpectedly profound, or a memorable inside-joke moment worth reminiscing about later? Be very conservative; most conversations have nothing worth saving. Routine conversation, generic statements and bot messages never count. Pick its ID, or "${NO_KEY_MESSAGE}" if nothing stands out.`,
+          choices: [
+            { value: NO_KEY_MESSAGE, description: "Nothing stands out" },
+            ...candidates.map((m) => ({
+              value: m.id,
+              description: `${m.author}: ${m.content.slice(0, 200)}`,
+            })),
+          ],
         },
       ],
-      schema: {
-        type: "object",
-        properties: {
-          keyMessageId: {
-            type: ["string", "null"],
-            description:
-              "The ID of the most memorable message, or null if nothing stands out",
-          },
-        },
-        required: ["keyMessageId"],
-        additionalProperties: false,
-      },
-      schemaName: "scrapbookDetection",
-      model: "gpt-5.4-mini",
-    });
+    );
 
-    if (!result.isOk()) {
+    if (result.isErr()) {
       this.logger.error(
         { err: result.error },
         "Failed to detect key message for scrapbook",
@@ -82,15 +60,20 @@ Do NOT select messages that are:
       return null;
     }
 
-    const keyMessageId = result.value.keyMessageId;
-    if (keyMessageId) {
-      this.logger.info(
-        { keyMessageId },
-        "Detected memorable message for scrapbook",
-      );
+    const answer = result.value.choice("key_message");
+    if (
+      !answer ||
+      answer.value === NO_KEY_MESSAGE ||
+      answer.confidence < DETECTION_MIN_CONFIDENCE
+    ) {
+      return null;
     }
 
-    return keyMessageId;
+    this.logger.info(
+      { keyMessageId: answer.value, confidence: answer.confidence },
+      "Detected memorable message for scrapbook",
+    );
+    return answer.value;
   }
 
   async saveMemory(

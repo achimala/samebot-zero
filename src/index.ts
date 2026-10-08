@@ -4,7 +4,8 @@ import { DeploymentLock } from "./core/deployment-lock";
 import { createLogger } from "./core/logger";
 import { DiscordGateway } from "./discord/gateway";
 import { DiscordMessenger } from "./discord/messenger";
-import { OpenAIClient } from "./openai/client";
+import { ClaudeClient } from "./llm/claude";
+import { DecisionClient } from "./llm/decisions";
 import { GeminiClient } from "./gemini/client";
 import { SupabaseClient } from "./supabase/client";
 import type { Feature } from "./core/runtime";
@@ -28,13 +29,19 @@ import { ScrapbookService } from "./scrapbook/service";
 async function main() {
   const config = loadConfig();
   const logger = createLogger(config.logLevel);
+
+  // A stray rejection in one handler should be logged, not take the bot down.
+  process.on("unhandledRejection", (reason) => {
+    logger.error({ err: reason }, "Unhandled promise rejection");
+  });
   const gateway = new DiscordGateway(config, logger);
   const deploymentLock = new DeploymentLock(
     config.supabaseDbConnectionUri,
     logger,
   );
   const messenger = new DiscordMessenger(gateway.client, logger);
-  const openai = new OpenAIClient(config, logger);
+  const llm = new ClaudeClient(config, logger);
+  const decisions = new DecisionClient(config, logger);
   const gemini = new GeminiClient(config, logger);
   const supabase = new SupabaseClient(config, logger);
 
@@ -44,7 +51,7 @@ async function main() {
     supabase.getClient(),
     logger,
   );
-  const scrapbookService = new ScrapbookService(scrapbookStore, openai, logger);
+  const scrapbookService = new ScrapbookService(scrapbookStore, decisions, logger);
 
   const conversationFeature = new ConversationFeature();
 
@@ -53,7 +60,8 @@ async function main() {
     logger,
     discord: gateway.client,
     messenger,
-    openai,
+    llm,
+    decisions,
     gemini,
     supabase,
     memory: memoryService,

@@ -6,6 +6,7 @@ dotenv.config();
 const ConfigSchema = z.object({
   DISCORD_TOKEN: z.string().min(1, "DISCORD_TOKEN is required"),
   DISCORD_APP_ID: z.string().min(1, "DISCORD_APP_ID is required"),
+  ANTHROPIC_API_KEY: z.string().min(1, "ANTHROPIC_API_KEY is required"),
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
   GOOGLE_API_KEY: z.string().min(1, "GOOGLE_API_KEY is required"),
   CURSOR_API_KEY: z.string().min(1, "CURSOR_API_KEY is required"),
@@ -36,6 +37,7 @@ const ConfigSchema = z.object({
 export type AppConfig = {
   discordToken: string;
   discordAppId: string;
+  anthropicApiKey: string;
   openAIApiKey: string;
   googleApiKey: string;
   cursorApiKey: string;
@@ -66,6 +68,7 @@ export function loadConfig(): AppConfig {
   return {
     discordToken: env.DISCORD_TOKEN,
     discordAppId: env.DISCORD_APP_ID,
+    anthropicApiKey: env.ANTHROPIC_API_KEY,
     openAIApiKey: env.OPENAI_API_KEY,
     googleApiKey: env.GOOGLE_API_KEY,
     cursorApiKey: env.CURSOR_API_KEY,

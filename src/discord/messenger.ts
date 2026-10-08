@@ -174,13 +174,14 @@ export class DiscordMessenger {
     return this.client.channels.fetch(channelId) as Promise<TextBasedChannel>;
   }
 
+  /** Sends content in chunks; resolves with the ID of the last chunk sent. */
   private sendContent(
     channel: TextBasedChannel,
     content: string,
     replyTo?: Message,
   ) {
     const chunks = chunkMessage(content);
-    return chunks.reduce<ResultAsync<void, BotError>>(
+    return chunks.reduce<ResultAsync<{ messageId: string }, BotError>>(
       (acc, chunk) => {
         return acc.andThen(() => {
           if (replyTo) {
@@ -188,7 +189,7 @@ export class DiscordMessenger {
             return ResultAsync.fromPromise(replyPromise, (error) => {
               this.logger.error({ err: error }, "Failed to send message");
               return Errors.discord("Unable to send message");
-            }).map<void>(() => undefined);
+            }).map((message) => ({ messageId: message.id }));
           }
           const sendableChannel = this.assertSendableChannel(channel);
           if (sendableChannel === null) {
@@ -200,10 +201,10 @@ export class DiscordMessenger {
           return ResultAsync.fromPromise(sendPromise, (error) => {
             this.logger.error({ err: error }, "Failed to send message");
             return Errors.discord("Unable to send message");
-          }).map<void>(() => undefined);
+          }).map((message) => ({ messageId: message.id }));
         });
       },
-      ResultAsync.fromSafePromise<void>(Promise.resolve(undefined)),
+      ResultAsync.fromSafePromise(Promise.resolve({ messageId: "" })),
     );
   }
 

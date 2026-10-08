@@ -63,7 +63,7 @@ export class ScrapbookFeature implements Feature {
       }
     });
 
-    context.discord.once("ready", () => {
+    context.discord.once("clientReady", () => {
       this.startInactivityTimer();
     });
   }
@@ -187,6 +187,7 @@ export class ScrapbookFeature implements Feature {
       const imageOptions: Parameters<typeof this.ctx.gemini.generateImage>[0] = {
         prompt: imagePromptResult.textPrompt,
         aspectRatio: "16:9",
+        quality: "best",
       };
       if (imagePromptResult.referenceImages) {
         imageOptions.referenceImages = imagePromptResult.referenceImages;
@@ -248,7 +249,7 @@ export class ScrapbookFeature implements Feature {
     memory: ScrapbookMemory,
   ): Promise<{ textPrompt: string; referenceImages?: Array<{ data: string; mimeType: string }> } | null> {
     return generateScrapbookImagePrompt(
-      this.ctx.openai,
+      this.ctx.llm,
       this.entityResolver,
       memory,
       this.ctx.logger,

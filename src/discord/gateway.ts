@@ -32,7 +32,7 @@ export class DiscordGateway {
   }
 
   async start() {
-    this.client.once("ready", async (client) => {
+    this.client.once("clientReady", async (client) => {
       this.logger.info({ bot: client.user.tag }, "Discord connected");
       await this.fetchCustomEmoji();
       await this.registerCommands();

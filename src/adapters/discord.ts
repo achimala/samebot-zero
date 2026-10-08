@@ -20,9 +20,7 @@ export class DiscordAdapter {
     const result = await this.messenger.sendToChannel(channelId, content);
 
     return result.match(
-      () => {
-        return { messageId: `sent_${Date.now()}` };
-      },
+      (value) => value,
       (error) => {
         this.logger.error({ err: error }, "Failed to send message");
         return { messageId: "" };
@@ -219,49 +217,9 @@ export class DiscordAdapter {
       }
     }
 
-    const images: string[] = [];
-    if (message.attachments.size > 0) {
-      const imageAttachments = Array.from(message.attachments.values()).filter(
-        (attachment) => attachment.contentType?.startsWith("image"),
-      );
-      for (const attachment of imageAttachments) {
-        await ResultAsync.fromPromise(fetch(attachment.url), (error) => {
-          this.logger.error(
-            { err: error, url: attachment.url },
-            "Failed to fetch image",
-          );
-          return Errors.discord("Unable to fetch image");
-        })
-          .andThen((response) => {
-            if (!response.ok) {
-              this.logger.warn(
-                { url: attachment.url, status: response.status },
-                "Failed to fetch image",
-              );
-              return ResultAsync.fromSafePromise<string>(
-                Promise.reject(new Error("Response not ok")),
-              );
-            }
-            return ResultAsync.fromPromise(response.arrayBuffer(), (error) => {
-              this.logger.error(
-                { err: error, url: attachment.url },
-                "Failed to read image buffer",
-              );
-              return Errors.discord("Unable to read image buffer");
-            }).map((buffer) => {
-              const base64 = Buffer.from(buffer).toString("base64");
-              const mimeType = attachment.contentType || "image/jpeg";
-              return `data:${mimeType};base64,${base64}`;
-            });
-          })
-          .match(
-            (base64Image) => {
-              images.push(base64Image);
-            },
-            () => {},
-          );
-      }
-    }
+    const images = Array.from(message.attachments.values())
+      .filter((attachment) => attachment.contentType?.startsWith("image"))
+      .map((attachment) => attachment.url);
 
     return {
       content: content.trim() || "(silent)",

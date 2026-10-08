@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { ResponseDecision } from "../agent/response-decision";
 import type { AgentContext, IncomingMessage } from "../agent/types";
-import { OpenAIClient } from "../openai/client";
+import { DecisionClient } from "../llm/decisions";
 import { createLogger } from "../core/logger";
+import type { AppConfig } from "../core/config";
 
 function createMockIncomingMessage(options: {
   content: string;
@@ -25,44 +26,28 @@ function createMockIncomingMessage(options: {
   };
 }
 
-function createOpenAIClient(): OpenAIClient | null {
+function createDecisionClient(): DecisionClient | null {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return null;
   }
   const logger = createLogger("silent");
-  return new OpenAIClient(
-    {
-      openAIApiKey: apiKey,
-      discordToken: "",
-      discordAppId: "",
-      cursorApiKey: "",
-      supabaseUrl: "",
-      supabaseServiceRoleKey: "",
-      honchoUrl: "http://localhost:8000",
-      honchoApiKey: "test-honcho-key",
-      honchoWorkspaceId: "test-workspace",
-      honchoAssistantPeerId: "test-assistant",
-      mainChannelId: "",
-      imageOfDayChannelId: "",
-      emojiGuildId: "",
-      mainGuildId: "",
-      logLevel: "silent",
-    },
+  return new DecisionClient(
+    { openAIApiKey: apiKey } as AppConfig,
     logger,
   );
 }
 
 describe("ResponseDecision", () => {
-  const openaiClient = createOpenAIClient();
-  const hasOpenAI = openaiClient !== null;
+  const decisionClient = createDecisionClient();
+  const hasDecisions = decisionClient !== null;
 
   describe("shouldRespond", () => {
     it("always returns true for DMs", async () => {
-      if (!openaiClient) {
+      if (!decisionClient) {
         return;
       }
-      const decision = new ResponseDecision({ openai: openaiClient });
+      const decision = new ResponseDecision({ decisions: decisionClient });
       const message = createMockIncomingMessage({
         content: "hello",
         isDm: true,
@@ -79,10 +64,10 @@ describe("ResponseDecision", () => {
     });
 
     it("always returns true when message contains 'samebot'", async () => {
-      if (!openaiClient) {
+      if (!decisionClient) {
         return;
       }
-      const decision = new ResponseDecision({ openai: openaiClient });
+      const decision = new ResponseDecision({ decisions: decisionClient });
       const message = createMockIncomingMessage({
         content: "hey samebot what's up",
         isDm: false,
@@ -99,10 +84,10 @@ describe("ResponseDecision", () => {
     });
 
     it("always returns true when message contains 'samebot' case-insensitive", async () => {
-      if (!openaiClient) {
+      if (!decisionClient) {
         return;
       }
-      const decision = new ResponseDecision({ openai: openaiClient });
+      const decision = new ResponseDecision({ decisions: decisionClient });
       const message = createMockIncomingMessage({
         content: "Hey SAMEBOT can you help?",
         isDm: false,
@@ -119,11 +104,11 @@ describe("ResponseDecision", () => {
     });
 
     it("always returns true when bot is @mentioned", async () => {
-      if (!openaiClient) {
+      if (!decisionClient) {
         return;
       }
       const decision = new ResponseDecision({
-        openai: openaiClient,
+        decisions: decisionClient,
         botUserId: "bot123",
       });
       const message = createMockIncomingMessage({
@@ -142,11 +127,11 @@ describe("ResponseDecision", () => {
       expect(result).toBe(true);
     });
 
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
-      "uses LLM when no explicit triggers",
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
+      "uses the Decisions API when no explicit triggers",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const message = createMockIncomingMessage({
@@ -183,10 +168,10 @@ describe("ResponseDecision", () => {
 
   describe("buildConversationContext", () => {
     it("formats conversation with timing information", () => {
-      if (!openaiClient) {
+      if (!decisionClient) {
         return;
       }
-      const decision = new ResponseDecision({ openai: openaiClient });
+      const decision = new ResponseDecision({ decisions: decisionClient });
       const now = Date.now();
       const context: AgentContext = {
         history: [
@@ -217,17 +202,17 @@ describe("ResponseDecision", () => {
 
       const result = decision.buildConversationContext(context);
 
-      expect(result).toContain("user: alice: hello");
-      expect(result).toContain("assistant: hi there");
-      expect(result).toContain("user: bob: what's up");
+      expect(result).toContain("alice: hello");
+      expect(result).toContain("samebot: hi there");
+      expect(result).toContain("bob: what's up");
       expect(result).toMatch(/\[\d+s ago\]/);
     });
 
     it("handles minutes ago format", () => {
-      if (!openaiClient) {
+      if (!decisionClient) {
         return;
       }
-      const decision = new ResponseDecision({ openai: openaiClient });
+      const decision = new ResponseDecision({ decisions: decisionClient });
       const now = Date.now();
       const context: AgentContext = {
         history: [
@@ -249,10 +234,10 @@ describe("ResponseDecision", () => {
     });
 
     it("handles hours ago format", () => {
-      if (!openaiClient) {
+      if (!decisionClient) {
         return;
       }
-      const decision = new ResponseDecision({ openai: openaiClient });
+      const decision = new ResponseDecision({ decisions: decisionClient });
       const now = Date.now();
       const context: AgentContext = {
         history: [
@@ -274,10 +259,10 @@ describe("ResponseDecision", () => {
     });
 
     it("includes all messages with timestamps", () => {
-      if (!openaiClient) {
+      if (!decisionClient) {
         return;
       }
-      const decision = new ResponseDecision({ openai: openaiClient });
+      const decision = new ResponseDecision({ decisions: decisionClient });
       const now = Date.now();
       const context: AgentContext = {
         history: [
@@ -307,10 +292,10 @@ describe("ResponseDecision", () => {
     });
 
     it("handles empty context", () => {
-      if (!openaiClient) {
+      if (!decisionClient) {
         return;
       }
-      const decision = new ResponseDecision({ openai: openaiClient });
+      const decision = new ResponseDecision({ decisions: decisionClient });
       const context: AgentContext = {
         history: [],
         isDm: false,
@@ -323,12 +308,12 @@ describe("ResponseDecision", () => {
     });
   });
 
-  describe("simulated conversations with LLM", () => {
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
+  describe("simulated conversations with the Decisions API", () => {
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should respond when user asks direct question to bot in active conversation",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const now = Date.now();
@@ -371,11 +356,11 @@ describe("ResponseDecision", () => {
       },
     );
 
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should not respond when users are talking to each other",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const now = Date.now();
@@ -419,11 +404,11 @@ describe("ResponseDecision", () => {
       },
     );
 
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should respond in active conversation thread with clear follow-up",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const now = Date.now();
@@ -467,11 +452,11 @@ describe("ResponseDecision", () => {
       },
     );
 
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should not respond to ambiguous messages",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const now = Date.now();
@@ -508,11 +493,11 @@ describe("ResponseDecision", () => {
       },
     );
 
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should respond to clear question directed at bot in active conversation",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const now = Date.now();
@@ -555,11 +540,11 @@ describe("ResponseDecision", () => {
       },
     );
 
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should not respond to general conversation",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const now = Date.now();
@@ -596,11 +581,11 @@ describe("ResponseDecision", () => {
       },
     );
 
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should not respond to ambiguous question without clear context",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const now = Date.now();
@@ -637,11 +622,11 @@ describe("ResponseDecision", () => {
       },
     );
 
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should not respond when question could be for anyone",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const now = Date.now();
@@ -678,11 +663,11 @@ describe("ResponseDecision", () => {
       },
     );
 
-    (hasOpenAI ? it.concurrent : it.concurrent.skip)(
+    (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should not respond to standalone question without bot context",
       async () => {
         const decision = new ResponseDecision({
-          openai: openaiClient!,
+          decisions: decisionClient!,
           botUserId: "bot123",
         });
         const now = Date.now();

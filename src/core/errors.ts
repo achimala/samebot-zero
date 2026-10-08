@@ -1,13 +1,13 @@
 export type BotError =
-  | { type: "openai"; message: string }
+  | { type: "llm"; message: string }
   | { type: "gemini"; message: string }
   | { type: "discord"; message: string }
   | { type: "config"; message: string }
   | { type: "scheduler"; message: string };
 
 export const Errors = {
-  openai(message: string): BotError {
-    return { type: "openai", message };
+  llm(message: string): BotError {
+    return { type: "llm", message };
   },
   gemini(message: string): BotError {
     return { type: "gemini", message };

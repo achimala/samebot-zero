@@ -14,15 +14,19 @@ import {
   shouldConvertToAphorism,
   convertToAphorism,
 } from "../utils/aphorism-converter";
+import type { ModelTier } from "../llm/claude";
 
 const AUTO_REACT_PROBABILITY = 0.15;
 const SAY_SAME_PROBABILITY = 0.2;
+const HISTORY_LIMIT = 50;
 
 interface ConversationState {
   history: AgentMessage[];
   isDm: boolean;
   channelId: string;
   lastResponseAt?: number;
+  /** Whether history has been backfilled from Discord since startup. */
+  initialized: boolean;
 }
 
 export class ConversationFeature implements Feature {
@@ -33,6 +37,8 @@ export class ConversationFeature implements Feature {
   private adapter!: DiscordAdapter;
   private responseDecision!: ResponseDecision;
   private entityResolver!: EntityResolver;
+  /** Per-channel promise chains so messages in a channel are handled in order. */
+  private readonly channelQueues = new Map<string, Promise<void>>();
 
   getContext(channelId: string): AgentContext | undefined {
     const context = this.contexts.get(channelId);
@@ -55,33 +61,16 @@ export class ConversationFeature implements Feature {
     options: {
       systemMessage: string;
       userMessage: string;
-      allowSearch?: boolean;
+      webSearch?: boolean;
       preserveWhitespace?: boolean;
+      model?: ModelTier;
     },
   ) {
-    const context = this.getContext(channelId);
-    if (!context) {
-      const chatOptions: {
-        messages: Array<{
-          role: "system" | "user" | "assistant";
-          content: string;
-        }>;
-        allowSearch?: boolean;
-        preserveWhitespace?: boolean;
-      } = {
-        messages: [
-          { role: "system", content: options.systemMessage },
-          { role: "user", content: options.userMessage },
-        ],
-      };
-      if (options.allowSearch !== undefined) {
-        chatOptions.allowSearch = options.allowSearch;
-      }
-      if (options.preserveWhitespace !== undefined) {
-        chatOptions.preserveWhitespace = options.preserveWhitespace;
-      }
-      return this.ctx.openai.chat(chatOptions);
-    }
+    const context = this.getContext(channelId) ?? {
+      history: [],
+      isDm: false,
+      channelId,
+    };
     return this.agent.chatWithContext(context, options);
   }
 
@@ -114,7 +103,7 @@ export class ConversationFeature implements Feature {
     );
 
     this.agent = new Agent(
-      context.openai,
+      context.llm,
       context.gemini,
       context.memory,
       context.scrapbook,
@@ -126,14 +115,14 @@ export class ConversationFeature implements Feature {
     );
 
     this.responseDecision = new ResponseDecision({
-      openai: context.openai,
+      decisions: context.decisions,
       logger: context.logger,
     });
 
-    context.discord.once("ready", (client) => {
+    context.discord.once("clientReady", (client) => {
       this.botUserId = client.user.id;
       this.responseDecision = new ResponseDecision({
-        openai: context.openai,
+        decisions: context.decisions,
         botUserId: client.user.id,
         logger: context.logger,
       });
@@ -141,7 +130,9 @@ export class ConversationFeature implements Feature {
     });
 
     context.discord.on("messageCreate", (message) => {
-      void this.handleMessage(message);
+      this.enqueue(message.channelId || message.author.id, () =>
+        this.handleMessage(message),
+      );
     });
 
     context.discord.on("interactionCreate", (interaction) => {
@@ -154,6 +145,21 @@ export class ConversationFeature implements Feature {
     });
   }
 
+  private enqueue(key: string, task: () => Promise<void>) {
+    const previous = this.channelQueues.get(key) ?? Promise.resolve();
+    const next = previous
+      .then(task)
+      .catch((error: unknown) => {
+        this.ctx.logger.error({ err: error, channelId: key }, "Failed to handle message");
+      })
+      .finally(() => {
+        if (this.channelQueues.get(key) === next) {
+          this.channelQueues.delete(key);
+        }
+      });
+    this.channelQueues.set(key, next);
+  }
+
   private async handleMessage(message: Message) {
     if (message.author.bot || message.system) {
       return;
@@ -164,19 +170,21 @@ export class ConversationFeature implements Feature {
 
     const key = message.channelId || message.author.id;
     const isDm = !message.inGuild();
-    let context = this.contexts.get(key) ?? {
+    const context = this.contexts.get(key) ?? {
       history: [],
       isDm,
       channelId: key,
+      initialized: false,
     };
     context.isDm = isDm;
+    this.contexts.set(key, context);
 
-    await this.backfillMessages(message.channelId, context, message.id);
+    if (!context.initialized) {
+      await this.backfillMessages(message.channelId, context, message.id);
+      context.initialized = true;
+    }
 
-    const existingMessageIds = new Set(context.history.map((msg) => msg.id));
-    if (existingMessageIds.has(message.id)) {
-      context.history = context.history.slice(-50);
-      this.contexts.set(key, context);
+    if (context.history.some((msg) => msg.id === message.id)) {
       return;
     }
 
@@ -191,14 +199,14 @@ export class ConversationFeature implements Feature {
     if (userMessageContent.length > 0) {
       const shouldConvert = await shouldConvertToAphorism(
         userMessageContent,
-        this.ctx.openai,
+        this.ctx.decisions,
         this.ctx.logger,
       );
 
       if (shouldConvert) {
         const converted = await convertToAphorism(
           userMessageContent,
-          this.ctx.openai,
+          this.ctx.llm,
           this.ctx.logger,
         );
         if (converted) {
@@ -212,38 +220,10 @@ export class ConversationFeature implements Feature {
       ...incomingMessage,
       content: userMessageContent,
     });
-    context.history.push(agentMessage);
-    context.history = context.history.slice(-50);
-    this.contexts.set(key, context);
-    await this.ctx.memory.syncMessage({
-      message: agentMessage,
-      channelId: key,
-      isDm,
-    });
+    this.appendHistory(context, agentMessage);
 
     if (aphorismReply) {
-      await this.adapter.sendTyping(message.channelId);
-      const sendResult = await this.adapter.sendMessage(
-        message.channelId,
-        aphorismReply,
-      );
-      if (sendResult.messageId) {
-        const assistantMessage: AgentMessage = {
-          id: sendResult.messageId,
-          role: "assistant",
-          content: aphorismReply,
-          timestamp: Date.now(),
-        };
-        context.history.push(assistantMessage);
-        await this.ctx.memory.syncMessage({
-          message: assistantMessage,
-          channelId: key,
-          isDm,
-        });
-      }
-      context.history = context.history.slice(-50);
-      context.lastResponseAt = Date.now();
-      this.contexts.set(key, context);
+      await this.sendReply(message.channelId, context, aphorismReply);
       return;
     }
 
@@ -262,67 +242,64 @@ export class ConversationFeature implements Feature {
 
     await this.adapter.sendTyping(message.channelId);
 
-    let response: { text: string | null; toolCallsMade: unknown[] };
-    if (Math.random() < SAY_SAME_PROBABILITY) {
-      const sameCheck = await this.agent.shouldSaySame(
+    const latestContent = incomingMessage.content || "(silent)";
+    const replyBriefly =
+      Math.random() < SAY_SAME_PROBABILITY &&
+      (await this.responseDecision.shouldReplyBriefly(
         agentContext,
-        incomingMessage.content || "(silent)",
-      );
-      if (sameCheck.shouldSaySame && sameCheck.response) {
-        response = { text: sameCheck.response, toolCallsMade: [] };
-      } else {
-        response = await this.agent.generateResponse(
-          agentContext,
-          message.id,
-        );
-      }
-    } else {
-      response = await this.agent.generateResponse(
-        agentContext,
-        message.id,
-      );
-    }
+        latestContent,
+      ));
+    const response = replyBriefly
+      ? await this.agent.generateBriefReply(agentContext)
+      : await this.agent.generateResponse(agentContext, message.id);
 
     if (response.text && response.text.length > 0) {
-      const sendResult = await this.adapter.sendMessage(
-        message.channelId,
-        response.text,
-      );
-      if (sendResult.messageId) {
-        const assistantMessage: AgentMessage = {
-          id: sendResult.messageId,
-          role: "assistant",
-          content: response.text,
-          timestamp: Date.now(),
-        };
-        context.history.push(assistantMessage);
-        await this.ctx.memory.syncMessage({
-          message: assistantMessage,
-          channelId: key,
-          isDm,
-        });
-      }
+      await this.sendReply(message.channelId, context, response.text);
     }
+  }
 
-    context.history = context.history.slice(-50);
+  private async sendReply(
+    channelId: string,
+    context: ConversationState,
+    text: string,
+  ) {
+    const sendResult = await this.adapter.sendMessage(channelId, text);
+    if (sendResult.messageId) {
+      this.appendHistory(context, {
+        id: sendResult.messageId,
+        role: "assistant",
+        content: text,
+        timestamp: Date.now(),
+      });
+    }
     context.lastResponseAt = Date.now();
-    this.contexts.set(key, context);
+  }
+
+  /** Adds a message to the in-memory history and syncs it to memory in the background. */
+  private appendHistory(context: ConversationState, message: AgentMessage) {
+    context.history.push(message);
+    context.history = context.history.slice(-HISTORY_LIMIT);
+    void this.ctx.memory
+      .syncMessage({ message, channelId: context.channelId, isDm: context.isDm })
+      .catch((error: unknown) => {
+        this.ctx.logger.warn({ err: error, messageId: message.id }, "Failed to sync message to memory");
+      });
   }
 
   private async backfillMessages(
     channelId: string,
     context: ConversationState,
-    beforeMessageId: string,
+    beforeMessageId?: string,
+    limit = HISTORY_LIMIT,
   ) {
     try {
       const messages = await this.adapter.fetchRecentMessages(
         channelId,
-        50,
+        limit,
         beforeMessageId,
       );
 
       const existingMessageIds = new Set(context.history.map((msg) => msg.id));
-
       const newMessages: AgentMessage[] = [];
 
       for (const msg of messages) {
@@ -356,11 +333,12 @@ export class ConversationFeature implements Feature {
       if (newMessages.length > 0) {
         context.history.push(...newMessages);
         context.history.sort((a, b) => a.timestamp - b.timestamp);
-        context.history = context.history.slice(-50);
-        await this.ctx.memory.syncMessages(
-          this.toAgentContext(context),
-          newMessages,
-        );
+        context.history = context.history.slice(-HISTORY_LIMIT);
+        void this.ctx.memory
+          .syncMessages(this.toAgentContext(context), newMessages)
+          .catch((error: unknown) => {
+            this.ctx.logger.warn({ err: error, channelId }, "Failed to sync backfilled messages");
+          });
       }
     } catch (error) {
       this.ctx.logger.error(
@@ -397,90 +375,36 @@ export class ConversationFeature implements Feature {
     const mainChannelId = this.ctx.config.mainChannelId;
 
     try {
-      const messages = await this.adapter.fetchRecentMessages(
-        mainChannelId,
-        10,
-      );
-
-      if (messages.length === 0) {
-        return;
-      }
-
-      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-      const mostRecentMessage = messages[0];
-      if (
-        !mostRecentMessage ||
-        mostRecentMessage.createdTimestamp < oneDayAgo
-      ) {
-        return;
-      }
-
-      const key = mainChannelId;
-      let context = this.contexts.get(key) ?? {
+      const context = this.contexts.get(mainChannelId) ?? {
         history: [],
         isDm: false,
         channelId: mainChannelId,
+        initialized: false,
       };
+      this.contexts.set(mainChannelId, context);
+      await this.backfillMessages(mainChannelId, context, undefined, 10);
 
-      const existingMessageIds = new Set(context.history.map((msg) => msg.id));
-
-      const newMessages: AgentMessage[] = [];
-
-      for (const msg of messages) {
-        if (existingMessageIds.has(msg.id)) {
-          continue;
-        }
-
-        if (msg.author.bot || msg.system) {
-          if (msg.author.id === this.botUserId) {
-            const content = msg.content.trim();
-            if (content.length === 0) {
-              continue;
-            }
-            newMessages.push({
-              id: msg.id,
-              role: "assistant",
-              content,
-              timestamp: msg.createdTimestamp,
-            });
-          }
-          continue;
-        }
-
-        const incomingMessage = await this.adapter.toIncomingMessage(
-          msg,
-          this.botUserId,
-        );
-        newMessages.push(this.toAgentMessage(incomingMessage));
+      const mostRecent = context.history[context.history.length - 1];
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      if (!mostRecent || mostRecent.timestamp < oneDayAgo) {
+        return;
       }
 
-      if (newMessages.length > 0) {
-        context.history.push(...newMessages);
-        context.history.sort((a, b) => a.timestamp - b.timestamp);
-        context.history = context.history.slice(-50);
-        this.contexts.set(key, context);
-        await this.ctx.memory.syncMessages(
-          this.toAgentContext(context),
-          newMessages,
-        );
-
-        const agentContext = this.toAgentContext(context);
-        const startupResponse = await this.agent.chatWithContext(agentContext, {
+      const startupResponse = await this.agent.chatWithContext(
+        this.toAgentContext(context),
+        {
           systemMessage: `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic British tone.\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
           userMessage:
             "Generate a brief startup message announcing that samebot has restarted successfully. Keep it short and contextually relevant to the conversation.",
-        });
+        },
+      );
 
-        startupResponse.match(
-          (responseText) => {
-            void this.adapter.sendMessage(mainChannelId, responseText);
-          },
-          (error) => {
-            this.ctx.logger.warn(
-              { err: error },
-              "Failed to generate startup message",
-            );
-          },
+      if (startupResponse.isOk()) {
+        await this.sendReply(mainChannelId, context, startupResponse.value);
+      } else {
+        this.ctx.logger.warn(
+          { err: startupResponse.error },
+          "Failed to generate startup message",
         );
       }
     } catch (error) {
@@ -500,10 +424,10 @@ export class ConversationFeature implements Feature {
     }
 
     const agentContext = this.toAgentContext(context);
-    const contextWithIds = this.agent.formatContextWithIds(agentContext);
+    const contextText = this.agent.formatContextText(agentContext);
     const emojiList = this.agent.buildEmojiList();
 
-    const payload = `=== CONTEXT (${context.history.length} messages) ===\n${contextWithIds.text}\n\n=== EMOJI ===\n${emojiList || "(none)"}`;
+    const payload = `=== CONTEXT (${context.history.length} messages) ===\n${contextText}\n\n=== EMOJI ===\n${emojiList || "(none)"}`;
 
     await interaction.reply({
       content: `\`\`\`\n${payload.slice(-1900)}\n\`\`\``,
@@ -512,6 +436,14 @@ export class ConversationFeature implements Feature {
   }
 
   private async handleAutoReact(message: Message, context: AgentContext) {
+    const shouldReact = await this.responseDecision.shouldReact(
+      context,
+      message.content || "(silent)",
+    );
+    if (!shouldReact) {
+      return;
+    }
+
     const emojis = await this.agent.generateAutoReact(
       context,
       message.content || "(silent)",

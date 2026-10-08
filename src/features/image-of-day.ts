@@ -10,19 +10,9 @@ import {
 const ZONE = "America/Los_Angeles";
 
 const PromptResponseSchema = z.object({
-  prompt: z.string().optional(),
-  caption: z.string().optional(),
+  prompt: z.string().describe("The image generation prompt"),
+  caption: z.string().describe("A short caption to post with the image"),
 });
-
-const promptResponseJsonSchema = {
-  type: "object",
-  properties: {
-    prompt: { type: "string" },
-    caption: { type: "string" },
-  },
-  required: ["prompt", "caption"],
-  additionalProperties: false,
-};
 
 export class ImageOfDayFeature implements Feature {
   private ctx!: RuntimeContext;
@@ -35,7 +25,7 @@ export class ImageOfDayFeature implements Feature {
     if (context.discord.isReady()) {
       this.scheduleNext();
     }
-    context.discord.on("ready", () => {
+    context.discord.once("clientReady", () => {
       this.scheduleNext();
     });
   }
@@ -101,9 +91,8 @@ export class ImageOfDayFeature implements Feature {
         ? `Date: ${today}. Create something fun and entertaining - make up your own funny meme or story! Keep caption under 120 characters.`
         : `Date: ${today}. Keep caption under 120 characters.`;
 
-      const ideation = await this.ctx.openai.chatStructured<
-        z.infer<typeof PromptResponseSchema>
-      >({
+      const ideation = await this.ctx.llm.chatStructured({
+        model: "opus",
         messages: [
           {
             role: "system",
@@ -114,10 +103,7 @@ export class ImageOfDayFeature implements Feature {
             content: userPrompt,
           },
         ],
-        schema: promptResponseJsonSchema,
-        schemaName: "prompt_response",
-        schemaDescription:
-          "A prompt and optional caption for generating a humorous meme image",
+        schema: PromptResponseSchema,
       });
 
       await ideation.match(
@@ -153,6 +139,7 @@ export class ImageOfDayFeature implements Feature {
             typeof this.ctx.gemini.generateImage
           >[0] = {
             prompt: effectivePrompt,
+            quality: "best",
           };
           if (referenceImages) {
             imageOptions.referenceImages = referenceImages;

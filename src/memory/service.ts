@@ -10,7 +10,10 @@ import type { AgentContext, AgentMessage } from "../agent/types";
 
 const CONTEXT_SEARCH_TOP_K = 10;
 const CONTEXT_MAX_CONCLUSIONS = 24;
-const MAX_RELATIONSHIP_CONTEXTS = 24;
+const CONTEXT_MAX_PARTICIPANTS = 5;
+/** Memory is a nice-to-have; never hold up a reply longer than this. */
+const CONTEXT_TIMEOUT_MS = 2_500;
+const CONTEXT_CACHE_TTL_MS = 60_000;
 const GLOBAL_SEARCH_PEER_LIMIT = 100;
 
 export interface HonchoSearchResult {
@@ -37,6 +40,12 @@ export class HonchoMemoryService {
   private readonly honcho: Honcho;
   private readonly peerCache = new Map<string, Promise<Peer>>();
   private readonly sessionCache = new Map<string, Promise<Session>>();
+  /** Session/peer pairs already registered, so we only call addPeers once. */
+  private readonly sessionPeers = new Set<string>();
+  private readonly promptContextCache = new Map<
+    string,
+    { value: string; expiresAt: number }
+  >();
 
   constructor(
     private readonly config: AppConfig,
@@ -50,37 +59,50 @@ export class HonchoMemoryService {
     });
   }
 
-  async syncMessage(input: SyncMessageInput): Promise<void> {
+  /**
+   * Adds a message to its Honcho session. Pass checkExisting for messages
+   * that may already have been synced (e.g. history backfilled on startup).
+   */
+  async syncMessage(
+    input: SyncMessageInput,
+    options: { checkExisting?: boolean } = {},
+  ): Promise<void> {
     const session = await this.getSession(input.channelId, input.isDm);
     const peer = await this.getMessagePeer(input.message);
 
-    await session.addPeers([
-      [
-        this.config.honchoAssistantPeerId,
-        {
-          observeMe: true,
-          observeOthers: true,
-        },
-      ],
-      [
-        peer.id,
-        {
-          observeMe: true,
-          observeOthers: true,
-        },
-      ],
-    ]);
+    const sessionPeerKey = `${session.id}:${peer.id}`;
+    if (!this.sessionPeers.has(sessionPeerKey)) {
+      await session.addPeers([
+        [
+          this.config.honchoAssistantPeerId,
+          {
+            observeMe: true,
+            observeOthers: true,
+          },
+        ],
+        [
+          peer.id,
+          {
+            observeMe: true,
+            observeOthers: true,
+          },
+        ],
+      ]);
+      this.sessionPeers.add(sessionPeerKey);
+    }
 
-    const existing = await session.messages({
-      filters: {
-        metadata: {
-          discordMessageId: input.message.id,
+    if (options.checkExisting) {
+      const existing = await session.messages({
+        filters: {
+          metadata: {
+            discordMessageId: input.message.id,
+          },
         },
-      },
-      size: 1,
-    });
-    if (existing.length > 0) {
-      return;
+        size: 1,
+      });
+      if (existing.length > 0) {
+        return;
+      }
     }
 
     const content = this.buildMessageContent(input.message);
@@ -112,31 +134,71 @@ export class HonchoMemoryService {
     messages: AgentMessage[],
   ): Promise<void> {
     for (const message of messages) {
-      await this.syncMessage({
-        message,
-        channelId: context.channelId,
-        isDm: context.isDm,
-      });
+      await this.syncMessage(
+        {
+          message,
+          channelId: context.channelId,
+          isDm: context.isDm,
+        },
+        { checkExisting: true },
+      );
     }
   }
 
+  /**
+   * Builds memory context for a reply: the session summary plus samebot's
+   * model of the most recent participants. Lookups run in parallel, are
+   * cached briefly per channel, and give up after CONTEXT_TIMEOUT_MS.
+   */
   async getPromptContext(
+    context: AgentContext,
+    searchQuery: string,
+  ): Promise<string> {
+    const cacheKey = context.channelId;
+    const cached = this.promptContextCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
+    const lookup = this.buildPromptContext(context, searchQuery);
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), CONTEXT_TIMEOUT_MS).unref(),
+    );
+    const result = await Promise.race([lookup, timeout]).catch(
+      (error: unknown) => {
+        this.logger.warn({ err: error }, "Failed to load memory context");
+        return null;
+      },
+    );
+
+    if (result === null) {
+      this.logger.warn({}, "Memory context unavailable; replying without it");
+      return cached?.value ?? "";
+    }
+
+    this.promptContextCache.set(cacheKey, {
+      value: result,
+      expiresAt: Date.now() + CONTEXT_CACHE_TTL_MS,
+    });
+    return result;
+  }
+
+  private async buildPromptContext(
     context: AgentContext,
     searchQuery: string,
   ): Promise<string> {
     const session = await this.getSession(context.channelId, context.isDm);
     const assistant = await this.getAssistantPeer();
-    const participants = this.getParticipants(context);
-    const sections: string[] = [];
+    const participants = this.getParticipants(context).slice(
+      -CONTEXT_MAX_PARTICIPANTS,
+    );
 
-    const summaries = await session.summaries();
-    if (summaries.longSummary) {
-      sections.push(`Session summary:\n${summaries.longSummary.content}`);
-    } else if (summaries.shortSummary) {
-      sections.push(`Session summary:\n${summaries.shortSummary.content}`);
-    }
+    const summarySection = session.summaries().then((summaries) => {
+      const summary = summaries.longSummary ?? summaries.shortSummary;
+      return summary ? `Session summary:\n${summary.content}` : "";
+    });
 
-    for (const participant of participants) {
+    const participantSections = participants.map(async (participant) => {
       const peer = await this.getDiscordPeer(participant);
       const peerContext = await assistant.context({
         target: peer,
@@ -145,49 +207,25 @@ export class HonchoMemoryService {
         includeMostFrequent: true,
         maxConclusions: CONTEXT_MAX_CONCLUSIONS,
       });
-      const formatted = this.formatPeerContext(
+      return this.formatPeerContext(
         `Samebot's model of ${participant.displayName}`,
         peerContext,
       );
-      if (formatted) {
-        sections.push(formatted);
-      }
-    }
+    });
 
-    let relationshipContexts = 0;
-    for (const observer of participants) {
-      for (const observed of participants) {
-        if (observer.peerId === observed.peerId) {
-          continue;
+    const sections = await Promise.allSettled([
+      summarySection,
+      ...participantSections,
+    ]);
+    return sections
+      .flatMap((section) => {
+        if (section.status === "rejected") {
+          this.logger.warn({ err: section.reason }, "Memory lookup failed");
+          return [];
         }
-        if (relationshipContexts >= MAX_RELATIONSHIP_CONTEXTS) {
-          break;
-        }
-
-        const observerPeer = await this.getDiscordPeer(observer);
-        const observedPeer = await this.getDiscordPeer(observed);
-        const peerContext = await observerPeer.context({
-          target: observedPeer,
-          searchQuery,
-          searchTopK: CONTEXT_SEARCH_TOP_K,
-          includeMostFrequent: true,
-          maxConclusions: CONTEXT_MAX_CONCLUSIONS,
-        });
-        const formatted = this.formatPeerContext(
-          `${observer.displayName}'s model of ${observed.displayName}`,
-          peerContext,
-        );
-        if (formatted) {
-          sections.push(formatted);
-          relationshipContexts++;
-        }
-      }
-      if (relationshipContexts >= MAX_RELATIONSHIP_CONTEXTS) {
-        break;
-      }
-    }
-
-    return sections.join("\n\n");
+        return section.value ? [section.value] : [];
+      })
+      .join("\n\n");
   }
 
   async searchMemories(
@@ -361,6 +399,8 @@ export class HonchoMemoryService {
         continue;
       }
       const peerId = this.discordPeerId(message.authorId);
+      // Re-insert so the map ends up ordered by each participant's latest message.
+      participants.delete(peerId);
       participants.set(peerId, {
         peerId,
         discordUserId: message.authorId,

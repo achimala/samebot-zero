@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   Message,
   MessageReaction,
@@ -10,10 +11,6 @@ import { EmojiGenerator, type ReferenceImage } from "../utils/emoji-generator";
 
 const ROBOT_EMOJI = "🤖";
 const PROGRESS_EMOJI = "⏳";
-
-interface EmojiPromptResponse {
-  prompt: string;
-}
 
 interface MessageContext {
   text: string;
@@ -244,7 +241,8 @@ ${context.images.length > 0 ? "If images are present in the context, consider th
       userMessage.images = imageUrls;
     }
 
-    return this.ctx.openai.chatStructured<EmojiPromptResponse>({
+    return this.ctx.llm.chatStructured({
+      model: "sonnet",
       messages: [
         {
           role: "system",
@@ -252,20 +250,11 @@ ${context.images.length > 0 ? "If images are present in the context, consider th
         },
         userMessage,
       ],
-      schema: {
-        type: "object",
-        properties: {
-          prompt: {
-            type: "string",
-            description:
-              "A short image prompt (5-15 words) for the emoji to generate",
-          },
-        },
-        required: ["prompt"],
-        additionalProperties: false,
-      },
-      schemaName: "emojiPrompt",
-      schemaDescription: "Generated emoji prompt based on message context",
+      schema: z.object({
+        prompt: z
+          .string()
+          .describe("A short image prompt (5-15 words) for the emoji to generate"),
+      }),
     });
   }
 }

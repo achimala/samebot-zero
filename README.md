@@ -1,14 +1,29 @@
 # Samebot Zero
 
-A modern, single-process TypeScript rewrite of Samebot Neue. It keeps the fun conversational tone, emoji gimmicks, and meme-of-the-day posts while relying only on Discord + OpenAI (`gpt-5.5` with `web_search` and `gpt-image-2`).
+A single-process TypeScript Discord bot. It keeps the fun conversational tone, emoji gimmicks, and meme-of-the-day posts.
+
+## Models
+
+| Job | Model |
+|---|---|
+| Conversation agent (tools, web search, vision) | Claude Sonnet 5.5 via the Anthropic SDK tool runner |
+| Quick text jobs (emoji picks, names, brief replies) | Claude Haiku 5.5 |
+| Creative prompt writing (scrapbook art, robot emoji) | Claude Sonnet 5.5 |
+| Image of the day ideation | Claude Opus 5.5 |
+| Yes/no and pick-one decisions (should reply, should react, scrapbook detection, aphorism check) | OpenAI Decisions API (`gpt-6-luna`) |
+| Images | Gemini `gemini-3.1-flash-lite-image` (interactive), `gemini-nano-banana-2.1` (scheduled) |
+| Video / GIFs | Gemini `gemini-omni-1.1-flash` |
+| Long-term memory | Honcho |
+
+LLM clients live in `src/llm/` (`claude.ts`, `decisions.ts`).
 
 ## Features
 
 - **Conversation brain** – persona-aware replies for guild channels and DMs with smart mention/follow-up heuristics.
-- **Slash utilities** – `/img` generates art with OpenAI (`gpt-image-2`), `/debug` dumps the live context for the current channel.
-- **Auto-react + reaction echo** – lightweight emoji reactions powered by GPT and a Swift-style +1 port.
+- **Slash utilities** – `/img` generates art with Gemini, `/debug` dumps the live context for the current channel.
+- **Auto-react + reaction echo** – the Decisions API decides when to react, Claude picks the emoji.
 - **Image of the day** – daily meme prompt + caption scheduled for 8am America/Los_Angeles sent to a configurable channel.
-- **Zero microservices** – Discord gateway, schedulers, and OpenAI access all run inside one Node process with strict typing and `neverthrow` results.
+- **Single process** – Discord gateway, schedulers, and model access all run inside one Node process with strict typing and `neverthrow` results.
 
 ## Getting Started
 
@@ -18,7 +33,9 @@ A modern, single-process TypeScript rewrite of Samebot Neue. It keeps the fun co
    ```
 2. **Configure environment** – copy `.env.example` to `.env` and fill in values:
    - `DISCORD_TOKEN`, `DISCORD_APP_ID`
-   - `OPENAI_API_KEY`
+   - `ANTHROPIC_API_KEY`
+   - `OPENAI_API_KEY` (Decisions API only)
+   - `GOOGLE_API_KEY` (Gemini images/video)
    - `MAIN_CHANNEL_ID` (bot's home channel)
    - `IMAGE_OF_DAY_CHANNEL_ID` (defaults to `MAIN_CHANNEL_ID` if omitted)
 3. **Run locally**
@@ -34,16 +51,10 @@ A modern, single-process TypeScript rewrite of Samebot Neue. It keeps the fun co
 
 ## Development Notes
 
-- Source lives under `src/` grouped by domain (`core`, `discord`, `features`, `openai`).
-- All side effects use `neverthrow` results to avoid `try/catch`; see `src/openai/client.ts` & `src/discord/messenger.ts` for patterns.
+- Source lives under `src/` grouped by domain (`core`, `discord`, `features`, `llm`, `memory`).
+- All side effects use `neverthrow` results to avoid `try/catch`; see `src/llm/claude.ts` & `src/discord/messenger.ts` for patterns.
 - Lint & tests:
   ```bash
   pnpm lint
-  pnpm test
+  pnpm test   # Decisions tests hit the live API when OPENAI_API_KEY is set
   ```
-
-## Next Steps
-
-- Reintroduce long-term memory or tasks as future modules.
-- Expand heuristics for `web_search` tool usage once requirements solidify.
-- Add integration tests that mock Discord/OpenAI via `vitest` + `msw` if needed.
