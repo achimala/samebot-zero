@@ -12,8 +12,8 @@ const CONTEXT_SEARCH_TOP_K = 10;
 const CONTEXT_MAX_CONCLUSIONS = 24;
 const CONTEXT_MAX_PARTICIPANTS = 5;
 /** Memory is a nice-to-have; never hold up a reply longer than this. */
-const CONTEXT_TIMEOUT_MS = 2_500;
-const CONTEXT_CACHE_TTL_MS = 60_000;
+const CONTEXT_TIMEOUT_MS = 3_000;
+const CONTEXT_CACHE_TTL_MS = 5 * 60_000;
 const GLOBAL_SEARCH_PEER_LIMIT = 100;
 
 export interface HonchoSearchResult {
@@ -46,6 +46,8 @@ export class HonchoMemoryService {
     string,
     { value: string; expiresAt: number }
   >();
+  /** In-flight lookups per channel, shared by prefetches and replies. */
+  private readonly promptContextLookups = new Map<string, Promise<string>>();
 
   constructor(
     private readonly config: AppConfig,
@@ -146,41 +148,77 @@ export class HonchoMemoryService {
   }
 
   /**
-   * Builds memory context for a reply: the session summary plus samebot's
-   * model of the most recent participants. Lookups run in parallel, are
-   * cached briefly per channel, and give up after CONTEXT_TIMEOUT_MS.
+   * Starts a memory lookup for a channel in the background (if the cache is
+   * stale) so it's warm by the time a reply needs it.
    */
-  async getPromptContext(
-    context: AgentContext,
-    searchQuery: string,
-  ): Promise<string> {
-    const cacheKey = context.channelId;
-    const cached = this.promptContextCache.get(cacheKey);
+  prefetchPromptContext(context: AgentContext): void {
+    const cached = this.promptContextCache.get(context.channelId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return;
+    }
+    void this.startPromptContextLookup(context).catch(() => undefined);
+  }
+
+  /**
+   * Memory context for a reply: the session summary plus samebot's model of
+   * the most recent participants. Results are cached per channel. If the
+   * lookup is slower than CONTEXT_TIMEOUT_MS the reply goes ahead without it,
+   * and the lookup keeps running so the cache is warm for the next reply.
+   */
+  async getPromptContext(context: AgentContext): Promise<string> {
+    const cached = this.promptContextCache.get(context.channelId);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
 
-    const lookup = this.buildPromptContext(context, searchQuery);
+    const lookup = this.startPromptContextLookup(context);
     const timeout = new Promise<null>((resolve) =>
       setTimeout(() => resolve(null), CONTEXT_TIMEOUT_MS).unref(),
     );
-    const result = await Promise.race([lookup, timeout]).catch(
-      (error: unknown) => {
-        this.logger.warn({ err: error }, "Failed to load memory context");
-        return null;
-      },
-    );
+    const result = await Promise.race([lookup, timeout]).catch(() => null);
 
     if (result === null) {
-      this.logger.warn({}, "Memory context unavailable; replying without it");
+      this.logger.warn({}, "Memory context not ready; replying without it");
       return cached?.value ?? "";
     }
-
-    this.promptContextCache.set(cacheKey, {
-      value: result,
-      expiresAt: Date.now() + CONTEXT_CACHE_TTL_MS,
-    });
     return result;
+  }
+
+  private startPromptContextLookup(context: AgentContext): Promise<string> {
+    const key = context.channelId;
+    const inFlight = this.promptContextLookups.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const startedAt = Date.now();
+    const lookup = this.buildPromptContext(context, this.buildSearchQuery(context))
+      .then((value) => {
+        this.promptContextCache.set(key, {
+          value,
+          expiresAt: Date.now() + CONTEXT_CACHE_TTL_MS,
+        });
+        this.logger.debug({ ms: Date.now() - startedAt }, "Loaded memory context");
+        return value;
+      })
+      .catch((error: unknown) => {
+        this.logger.warn({ err: error }, "Failed to load memory context");
+        throw error;
+      })
+      .finally(() => {
+        this.promptContextLookups.delete(key);
+      });
+    this.promptContextLookups.set(key, lookup);
+    return lookup;
+  }
+
+  /** Search memory with what's being discussed now, not the whole history. */
+  private buildSearchQuery(context: AgentContext): string {
+    return context.history
+      .filter((message) => message.role === "user")
+      .slice(-3)
+      .map((message) => message.content)
+      .join("\n");
   }
 
   private async buildPromptContext(

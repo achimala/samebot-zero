@@ -231,10 +231,7 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
     }
 
     let dynamicPrompt = `Current date: ${DateTime.now().toISO()}`;
-    const memoryContext = await this.memory.getPromptContext(
-      context,
-      this.buildMemoryQuery(context),
-    );
+    const memoryContext = await this.memory.getPromptContext(context);
     if (memoryContext.length > 0) {
       dynamicPrompt += `\n\nMemory context:\n${memoryContext}`;
     }
@@ -243,15 +240,6 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
       { type: "text", text: staticPrompt, cache_control: { type: "ephemeral" } },
       { type: "text", text: dynamicPrompt },
     ];
-  }
-
-  /** Search memory with what's being discussed now, not the whole history. */
-  private buildMemoryQuery(context: AgentContext): string {
-    return context.history
-      .filter((message) => message.role === "user")
-      .slice(-3)
-      .map((message) => message.content)
-      .join("\n");
   }
 
   private buildHistoryMessages(context: AgentContext): ChatMessage[] {

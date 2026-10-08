@@ -221,6 +221,8 @@ export class ConversationFeature implements Feature {
       content: userMessageContent,
     });
     this.appendHistory(context, agentMessage);
+    // Warm memory in parallel with the reply decision.
+    this.ctx.memory.prefetchPromptContext(this.toAgentContext(context));
 
     if (aphorismReply) {
       await this.sendReply(message.channelId, context, aphorismReply);
