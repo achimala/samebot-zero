@@ -70,6 +70,47 @@ export class EntityResolver {
         continue;
       }
 
+      const substringMatch = searchableEntities.find((entity) => {
+        const normalizedEntityName = this.normalizeWord(entity.searchTerm);
+        const entityLength = normalizedEntityName.length;
+        const wordLength = normalizedWord.length;
+        
+        if (entityLength < 3) {
+          return false;
+        }
+        
+        if (wordLength <= entityLength) {
+          return false;
+        }
+        
+        if (wordLength - entityLength < 2) {
+          return false;
+        }
+        
+        if (!normalizedWord.includes(normalizedEntityName)) {
+          return false;
+        }
+        
+        const index = normalizedWord.indexOf(normalizedEntityName);
+        if (index === 0) {
+          return false;
+        }
+        
+        return true;
+      });
+      
+      if (substringMatch) {
+        const existingMatch = matchedEntities.get(substringMatch.folderName);
+        if (!existingMatch || existingMatch.score < 0.95) {
+          matchedEntities.set(substringMatch.folderName, {
+            word,
+            folder: substringMatch.folderName,
+            score: 0.95,
+          });
+        }
+        continue;
+      }
+
       const results = fuse.search(normalizedWord);
       if (results.length > 0) {
         const topResult = results[0]!;
