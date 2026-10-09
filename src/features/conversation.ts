@@ -132,7 +132,7 @@ export class ConversationFeature implements Feature {
         botUserId: client.user.id,
         logger: context.logger,
       });
-      void this.handleStartup();
+      this.enqueue(context.config.mainChannelId, () => this.handleStartup());
     });
 
     context.discord.on("messageCreate", (message) => {
@@ -409,7 +409,7 @@ export class ConversationFeature implements Feature {
         {
           systemMessage: `you are samebot, a hyper-intelligent, lowercase-talking friend with a dry, sarcastic British tone.\nCurrent date: ${DateTime.now().toISO()}\nRespond in lowercase only.`,
           userMessage:
-            "You just came back online after crashing unexpectedly. Write a brief message letting the channel know you're back. Keep it short and contextually relevant to the conversation.",
+            "You just came back online after crashing unexpectedly. Write a brief announcement letting the channel know you're back. This is not a reply: do not answer or respond to any of the messages above, they will be handled separately. Keep it short; the conversation is only there to set the tone.",
         },
       );
 
