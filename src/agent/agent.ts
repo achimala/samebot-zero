@@ -54,7 +54,7 @@ IMPORTANT: The scrapbook tools (get_scrapbook_memory, search_scrapbook, get_scra
 
 Your final text response is sent as a message to the channel. An empty response sends nothing - use this when your tool calls already provided the response (e.g. after scrapbook calls). Unless asked to, do not add commentary after the scrapbook tools that auto-post for you.
 
-Each conversation message is prefixed with [time ago] [message id] author. That prefix is internal metadata: use the message IDs when reacting, but never include the prefix in your reply.`;
+Each user message is prefixed with [time ago] [message id] author. That prefix is internal metadata: use the message IDs when reacting, but never include the prefix in your reply.`;
 
 type ImageAspectRatio =
   | "1:1"
@@ -255,9 +255,14 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
     return context.history
       .filter((message) => !isSilentAssistant(message))
       .map((message) => {
+        // Assistant turns stay unprefixed: prefixing samebot's own replies
+        // teaches the model to write its replies with the prefix.
         const chatMessage: ChatMessage = {
           role: message.role,
-          content: formatHistoryLine(message),
+          content:
+            message.role === "assistant"
+              ? message.content
+              : formatHistoryLine(message),
         };
         if (imageMessageIds.has(message.id) && message.images) {
           chatMessage.images = message.images;
