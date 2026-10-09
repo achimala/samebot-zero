@@ -11,8 +11,12 @@ import type { AgentContext, AgentMessage } from "../agent/types";
 const CONTEXT_SEARCH_TOP_K = 10;
 const CONTEXT_MAX_CONCLUSIONS = 24;
 const CONTEXT_MAX_PARTICIPANTS = 5;
-/** Memory is a nice-to-have; never hold up a reply longer than this. */
-const CONTEXT_TIMEOUT_MS = 3_000;
+/**
+ * How long after a lookup starts (usually at prefetch, when the message
+ * arrives) a reply waits for it. Lookups take ~4-5s; memory is a
+ * nice-to-have, so past this the reply goes ahead without it.
+ */
+const CONTEXT_WAIT_BUDGET_MS = 6_000;
 const CONTEXT_CACHE_TTL_MS = 5 * 60_000;
 const GLOBAL_SEARCH_PEER_LIMIT = 100;
 
@@ -47,7 +51,10 @@ export class HonchoMemoryService {
     { value: string; expiresAt: number }
   >();
   /** In-flight lookups per channel, shared by prefetches and replies. */
-  private readonly promptContextLookups = new Map<string, Promise<string>>();
+  private readonly promptContextLookups = new Map<
+    string,
+    { promise: Promise<string>; startedAt: number }
+  >();
 
   constructor(
     private readonly config: AppConfig,
@@ -156,14 +163,15 @@ export class HonchoMemoryService {
     if (cached && cached.expiresAt > Date.now()) {
       return;
     }
-    void this.startPromptContextLookup(context).catch(() => undefined);
+    void this.startPromptContextLookup(context).promise.catch(() => undefined);
   }
 
   /**
    * Memory context for a reply: the session summary plus samebot's model of
    * the most recent participants. Results are cached per channel. If the
-   * lookup is slower than CONTEXT_TIMEOUT_MS the reply goes ahead without it,
-   * and the lookup keeps running so the cache is warm for the next reply.
+   * lookup isn't done CONTEXT_WAIT_BUDGET_MS after it started, the reply goes
+   * ahead without it, and the lookup keeps running so the cache is warm for
+   * the next reply.
    */
   async getPromptContext(context: AgentContext): Promise<string> {
     const cached = this.promptContextCache.get(context.channelId);
@@ -172,19 +180,30 @@ export class HonchoMemoryService {
     }
 
     const lookup = this.startPromptContextLookup(context);
-    const timeout = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), CONTEXT_TIMEOUT_MS).unref(),
+    const remainingMs = Math.max(
+      0,
+      lookup.startedAt + CONTEXT_WAIT_BUDGET_MS - Date.now(),
     );
-    const result = await Promise.race([lookup, timeout]).catch(() => null);
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), remainingMs).unref(),
+    );
+    const result = await Promise.race([lookup.promise, timeout]).catch(
+      () => null,
+    );
 
     if (result === null) {
-      this.logger.warn({}, "Memory context not ready; replying without it");
+      this.logger.warn(
+        { waitedMs: Date.now() - lookup.startedAt },
+        "Memory context not ready; replying without it",
+      );
       return cached?.value ?? "";
     }
     return result;
   }
 
-  private startPromptContextLookup(context: AgentContext): Promise<string> {
+  private startPromptContextLookup(
+    context: AgentContext,
+  ): { promise: Promise<string>; startedAt: number } {
     const key = context.channelId;
     const inFlight = this.promptContextLookups.get(key);
     if (inFlight) {
@@ -192,7 +211,7 @@ export class HonchoMemoryService {
     }
 
     const startedAt = Date.now();
-    const lookup = this.buildPromptContext(context, this.buildSearchQuery(context))
+    const promise = this.buildPromptContext(context, this.buildSearchQuery(context))
       .then((value) => {
         this.promptContextCache.set(key, {
           value,
@@ -208,6 +227,7 @@ export class HonchoMemoryService {
       .finally(() => {
         this.promptContextLookups.delete(key);
       });
+    const lookup = { promise, startedAt };
     this.promptContextLookups.set(key, lookup);
     return lookup;
   }
