@@ -261,6 +261,9 @@ export class ConversationFeature implements Feature {
       ? await this.agent.generateBriefReply(agentContext)
       : await this.agent.generateResponse(agentContext, message.id);
 
+    for (const postedMessage of response.postedMessages) {
+      this.appendHistory(context, postedMessage);
+    }
     if (response.text && response.text.length > 0) {
       await this.sendReply(message.channelId, context, response.text);
     }
