@@ -95,8 +95,10 @@ export class ScrapbookFeature implements Feature {
     state.messagesSinceLastExtraction++;
 
     if (state.messagesSinceLastExtraction >= SCRAPBOOK_EXTRACTION_INTERVAL) {
-      await this.runScrapbookDetection(channelId);
+      // Reset before awaiting so messages arriving mid-detection don't start
+      // overlapping detections that save the same quote.
       state.messagesSinceLastExtraction = 0;
+      await this.runScrapbookDetection(channelId);
     }
   }
 
