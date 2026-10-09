@@ -116,6 +116,13 @@ export class ScrapbookService {
     }
 
     try {
+      // History is backfilled after a restart, so detection can pick a
+      // message that was already saved by the previous run.
+      if (await this.store.getByQuote(keyMessage.content)) {
+        this.logger.debug("Skipping scrapbook save - quote already saved");
+        return null;
+      }
+
       const memoryId = await this.store.insert({
         keyMessage: keyMessage.content,
         author: keyMessage.author,

@@ -14,6 +14,7 @@ import {
 import type { GeminiClient } from "../gemini/client";
 import type { HonchoMemoryService } from "../memory/service";
 import type { ScrapbookService } from "../scrapbook/service";
+import type { ScrapbookMemory } from "../scrapbook/store";
 import type { SupabaseClient } from "../supabase/client";
 import type { EntityResolver } from "../utils/entity-resolver";
 import type { DiscordAdapter } from "../adapters/discord";
@@ -53,7 +54,7 @@ IMPORTANT: The scrapbook tools (get_scrapbook_memory, search_scrapbook, get_scra
 
 Your final text response is sent as a message to the channel. An empty response sends nothing - use this when your tool calls already provided the response (e.g. after scrapbook calls). Unless asked to, do not add commentary after the scrapbook tools that auto-post for you.
 
-Each conversation message is prefixed with [time ago] [message id] author. That prefix is internal metadata: use the message IDs when reacting, but never include the prefix in your reply.`;
+Each user message is prefixed with [time ago] [message id] author. That prefix is internal metadata: use the message IDs when reacting, but never include the prefix in your reply.`;
 
 type ImageAspectRatio =
   | "1:1"
@@ -84,12 +85,13 @@ export class Agent {
   ): Promise<AgentResponse> {
     const system = await this.buildSystemPrompt(context);
     const { messages } = toMessageParams(this.buildHistoryMessages(context));
+    const postedMessages: AgentMessage[] = [];
 
     const result = await this.llm.runAgent({
       system,
       messages,
       tools: [
-        ...this.buildTools(context, triggerMessageId),
+        ...this.buildTools(context, triggerMessageId, postedMessages),
         WEB_SEARCH_TOOL,
       ],
       // Medium effort: replies range from banter to real answers, and the
@@ -100,8 +102,8 @@ export class Agent {
     });
 
     return result.match(
-      (text) => ({ text }),
-      () => ({ text: null }),
+      (text) => ({ text, postedMessages }),
+      () => ({ text: null, postedMessages }),
     );
   }
 
@@ -114,8 +116,8 @@ export class Agent {
         "Reply to the most recent message with a brief, natural one-to-three word agreement in the spirit of 'same'. Respond with only the reply.",
     });
     return result.match(
-      (text) => ({ text: text.toLowerCase() }),
-      () => ({ text: null }),
+      (text) => ({ text: text.toLowerCase(), postedMessages: [] }),
+      () => ({ text: null, postedMessages: [] }),
     );
   }
 
@@ -253,9 +255,14 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
     return context.history
       .filter((message) => !isSilentAssistant(message))
       .map((message) => {
+        // Assistant turns stay unprefixed: prefixing samebot's own replies
+        // teaches the model to write its replies with the prefix.
         const chatMessage: ChatMessage = {
           role: message.role,
-          content: formatHistoryLine(message),
+          content:
+            message.role === "assistant"
+              ? message.content
+              : formatHistoryLine(message),
         };
         if (imageMessageIds.has(message.id) && message.images) {
           chatMessage.images = message.images;
@@ -264,9 +271,23 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
       });
   }
 
-  private buildTools(context: AgentContext, triggerMessageId: string) {
+  private buildTools(
+    context: AgentContext,
+    triggerMessageId: string,
+    postedMessages: AgentMessage[],
+  ) {
     const channelId = context.channelId;
     const knownMessageIds = new Set(context.history.map((m) => m.id));
+    const recordPost = (messageId: string, content: string) => {
+      if (messageId) {
+        postedMessages.push({
+          id: messageId,
+          role: "assistant",
+          content,
+          timestamp: Date.now(),
+        });
+      }
+    };
 
     return [
       betaZodTool({
@@ -349,8 +370,7 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
           if (!memory) {
             return "No scrapbook memories found.";
           }
-          await this.adapter.sendMessage(channelId, formatScrapbookQuote(memory));
-          await this.postScrapbookImage(channelId, memory);
+          await this.postScrapbookMemories(channelId, [memory], recordPost);
           return `Posted scrapbook memory to channel [${memory.id}]: "${memory.keyMessage}" by ${memory.author}`;
         },
       }),
@@ -368,13 +388,7 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
           if (results.length === 0) {
             return "No matching scrapbook memories found.";
           }
-          await this.adapter.sendMessage(
-            channelId,
-            results.map(formatScrapbookQuote).join("\n\n"),
-          );
-          await Promise.all(
-            results.map((memory) => this.postScrapbookImage(channelId, memory)),
-          );
+          await this.postScrapbookMemories(channelId, results, recordPost);
           const summary = results
             .map((m) => `[${m.id}]: "${m.keyMessage}" by ${m.author}`)
             .join("; ");
@@ -398,13 +412,15 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
           const contextLines = memory.context
             .map((m) => `<${m.author}> ${m.content}`)
             .join("\n");
+          const contextMessage = `**context for "${memory.keyMessage}":**\n\`\`\`\n${contextLines}\n\`\`\``;
           const sendResult = await this.adapter.sendMessage(
             channelId,
-            `**context for "${memory.keyMessage}":**\n\`\`\`\n${contextLines}\n\`\`\``,
+            contextMessage,
           );
           if (!sendResult.messageId) {
             return "Failed to post context to channel.";
           }
+          recordPost(sendResult.messageId, contextMessage);
           return `Posted context for "${memory.keyMessage}" to channel`;
         },
       }),
@@ -534,15 +550,36 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
     return `Successfully generated and posted image for: ${prompt}`;
   }
 
-  private async postScrapbookImage(
+  /** Posts each memory as one message carrying its quote and image. */
+  private async postScrapbookMemories(
     channelId: string,
-    memory: {
-      id: string;
-      keyMessage: string;
-      author: string;
-      context: Array<{ author: string; content: string }>;
-    },
+    memories: ScrapbookMemory[],
+    recordPost: (messageId: string, content: string) => void,
   ) {
+    const memoriesWithImages = await Promise.all(
+      memories.map(async (memory) => ({
+        memory,
+        image: await this.generateScrapbookImage(memory),
+      })),
+    );
+    for (const { memory, image } of memoriesWithImages) {
+      const quote = formatScrapbookQuote(memory);
+      const { messageId } = image
+        ? await this.adapter.sendMessageWithImage(
+            channelId,
+            quote,
+            image.buffer,
+            "scrapbook-memory.png",
+            image.prompt,
+          )
+        : await this.adapter.sendMessage(channelId, quote);
+      recordPost(messageId, quote);
+    }
+  }
+
+  private async generateScrapbookImage(
+    memory: ScrapbookMemory,
+  ): Promise<{ buffer: Buffer; prompt: string } | null> {
     const imagePrompt = await generateScrapbookImagePrompt(
       this.llm,
       this.entityResolver,
@@ -550,7 +587,7 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
       this.logger,
     );
     if (!imagePrompt) {
-      return;
+      return null;
     }
     const imageResult = await this.gemini.generateImage({
       prompt: imagePrompt.textPrompt,
@@ -564,14 +601,9 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
         { err: imageResult.error, memoryId: memory.id },
         "Failed to generate scrapbook image",
       );
-      return;
+      return null;
     }
-    await this.adapter.sendImage(
-      channelId,
-      imageResult.value.buffer,
-      "scrapbook-memory.png",
-      imagePrompt.textPrompt,
-    );
+    return { buffer: imageResult.value.buffer, prompt: imagePrompt.textPrompt };
   }
 
   /** Downloads recent conversation images to use as generation references. */

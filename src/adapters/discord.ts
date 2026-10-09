@@ -78,6 +78,30 @@ export class DiscordAdapter {
     );
   }
 
+  async sendMessageWithImage(
+    channelId: string,
+    content: string,
+    buffer: Buffer,
+    filename: string,
+    description: string,
+  ): Promise<{ messageId: string }> {
+    const result = await this.messenger.sendBuffer(
+      channelId,
+      buffer,
+      filename,
+      description,
+      content,
+    );
+
+    return result.match(
+      (value) => value,
+      (error) => {
+        this.logger.error({ err: error }, "Failed to send message with image");
+        return { messageId: "" };
+      },
+    );
+  }
+
   async sendPlaceholderMessage(
     channelId: string,
     prompt: string,

@@ -136,6 +136,7 @@ export class DiscordMessenger {
     buffer: Buffer,
     filename: string,
     description?: string,
+    content?: string,
   ) {
     return ResultAsync.fromPromise(
       this.fetchTextChannel(channelId),
@@ -155,9 +156,12 @@ export class DiscordMessenger {
       if (description !== undefined) {
         filePayload.description = description;
       }
-      const sendOptions: { files: (typeof filePayload)[] } = {
+      const sendOptions: { content?: string; files: (typeof filePayload)[] } = {
         files: [filePayload],
       };
+      if (content !== undefined) {
+        sendOptions.content = content;
+      }
       const sendableChannel = this.assertSendableChannel(channel);
       if (sendableChannel === null) {
         return err(Errors.discord("Channel does not support sending messages"));

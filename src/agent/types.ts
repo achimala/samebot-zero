@@ -33,4 +33,6 @@ export type ToolResult =
 
 export interface AgentResponse {
   text: string | null;
+  /** Messages tools posted to the channel while generating the response. */
+  postedMessages: AgentMessage[];
 }
