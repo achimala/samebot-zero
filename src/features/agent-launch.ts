@@ -15,11 +15,9 @@ import {
 } from "discord.js";
 import { Octokit } from "@octokit/rest";
 import { type Feature, type RuntimeContext } from "../core/runtime";
-import { CursorClient } from "../cursor/client";
+import { CursorClient, prUrlOf, type StartedRun } from "../cursor/client";
 
 const REPOSITORY = "achimala/samebot-zero";
-const POLL_INTERVAL_MS = 3000;
-const MAX_POLL_ATTEMPTS = 100;
 
 interface PendingMergeData {
   channelId: string;
@@ -36,6 +34,7 @@ export class AgentLaunchFeature implements Feature {
     this.ctx = context;
     this.cursorClient = new CursorClient(
       context.config.cursorApiKey,
+      REPOSITORY,
       context.logger,
     );
     context.discord.on("interactionCreate", (interaction) => {
@@ -75,16 +74,12 @@ export class AgentLaunchFeature implements Feature {
       "pending",
       instructions,
     );
-    const message = await interaction.editReply({
+    await interaction.editReply({
       embeds: [initialEmbed],
     });
 
-    const launchResult = await this.cursorClient.launchAgent({
-      repository: REPOSITORY,
-      instructions,
-      model: "claude-opus-5-5",
-    });
-
+    const launchResult =
+      await this.cursorClient.launchAgent(instructions);
     if (launchResult.isErr()) {
       const { embed: errorEmbed } = this.createStatusEmbed(
         "failed",
@@ -96,128 +91,53 @@ export class AgentLaunchFeature implements Feature {
       return;
     }
 
-    const agentStatus = launchResult.value;
-    const normalizedStatus = this.normalizeStatus(agentStatus.status);
-    const { embed: initialStatusEmbed, components } = this.createStatusEmbed(
-      normalizedStatus,
-      instructions,
-      agentStatus.prUrl,
-      undefined,
-      agentStatus.id,
-    );
-    await interaction.editReply({
-      embeds: [initialStatusEmbed],
-      components: components ?? [],
-    });
-
-    await this.pollAndUpdateStatus(
-      message.id,
-      interaction,
-      agentStatus.id,
-      instructions,
-      false,
-    );
+    await this.reportRun(interaction, launchResult.value, instructions);
   }
 
-  private async pollAndUpdateStatus(
-    messageId: string,
+  /** Shows the run as running, then waits for it and shows the outcome. */
+  private async reportRun(
     interaction: ChatInputCommandInteraction | ModalSubmitInteraction,
-    agentId: string,
+    { agentId, run }: StartedRun,
     instructions: string,
-    isFollowUp: boolean = false,
   ) {
-    let attempts = 0;
-    let lastKnownPrUrl: string | undefined;
-    let hasSeenRunningAfterFollowUp = false;
+    const { embed: runningEmbed } = this.createStatusEmbed(
+      "running",
+      instructions,
+    );
+    await interaction.editReply({ embeds: [runningEmbed] });
 
-    while (attempts < MAX_POLL_ATTEMPTS) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-
-      const statusResult = await this.cursorClient.getAgentStatus(agentId);
-
-      if (statusResult.isErr()) {
-        const { embed: errorEmbed } = this.createStatusEmbed(
-          "failed",
-          instructions,
-          undefined,
-          statusResult.error.message,
-        );
-        await interaction.editReply({ embeds: [errorEmbed] });
-        return;
-      }
-
-      const status = statusResult.value;
-
-      const prUrl = status.prUrl ?? lastKnownPrUrl;
-      if (status.prUrl) {
-        lastKnownPrUrl = status.prUrl;
-      }
-
-      if (isFollowUp && status.status === "RUNNING") {
-        hasSeenRunningAfterFollowUp = true;
-      }
-
-      let normalizedStatus = this.normalizeStatus(status.status);
-
-      if (
-        isFollowUp &&
-        status.status === "FINISHED" &&
-        !hasSeenRunningAfterFollowUp
-      ) {
-        normalizedStatus = "running";
-      }
-
-      this.ctx.logger.debug(
-        {
-          agentId: status.id,
-          status: status.status,
-          prUrl,
-          normalizedStatus,
-          isFollowUp,
-          hasSeenRunningAfterFollowUp,
-        },
-        "Agent status update",
-      );
-
-      const { embed, components } = this.createStatusEmbed(
-        normalizedStatus,
+    const result = await this.cursorClient.waitForRun(run);
+    if (result.isErr()) {
+      const { embed: errorEmbed } = this.createStatusEmbed(
+        "failed",
         instructions,
-        prUrl,
-        status.status === "FAILED" ? status.summary : undefined,
-        status.id,
+        undefined,
+        result.error.message,
       );
-
-      await interaction.editReply({
-        embeds: [embed],
-        components: components ?? [],
-      });
-
-      if (status.status === "FINISHED" || status.status === "FAILED") {
-        if (
-          isFollowUp &&
-          status.status === "FINISHED" &&
-          !hasSeenRunningAfterFollowUp
-        ) {
-          attempts++;
-          continue;
-        }
-        if (status.status === "FINISHED" && !prUrl && attempts < 30) {
-          attempts++;
-          continue;
-        }
-        return;
-      }
-
-      attempts++;
+      await interaction.editReply({ embeds: [errorEmbed] });
+      return;
     }
 
-    const { embed: timeoutEmbed } = this.createStatusEmbed(
-      "failed",
-      instructions,
-      undefined,
-      "Polling timeout - agent may still be running",
-    );
-    await interaction.editReply({ embeds: [timeoutEmbed] });
+    const { status, error } = result.value;
+    const { embed, components } =
+      status === "finished"
+        ? this.createStatusEmbed(
+            "completed",
+            instructions,
+            prUrlOf(result.value),
+            undefined,
+            agentId,
+          )
+        : this.createStatusEmbed(
+            "failed",
+            instructions,
+            undefined,
+            error?.message ?? `Agent run ${status}`,
+          );
+    await interaction.editReply({
+      embeds: [embed],
+      components: components ?? [],
+    });
   }
 
   private createStatusEmbed(
@@ -315,21 +235,6 @@ export class AgentLaunchFeature implements Feature {
         return 0x2ecc71;
       case "failed":
         return 0xe74c3c;
-    }
-  }
-
-  private normalizeStatus(
-    status: "CREATING" | "RUNNING" | "FINISHED" | "FAILED",
-  ): "pending" | "running" | "completed" | "failed" {
-    switch (status) {
-      case "CREATING":
-        return "pending";
-      case "RUNNING":
-        return "running";
-      case "FINISHED":
-        return "completed";
-      case "FAILED":
-        return "failed";
     }
   }
 
@@ -641,7 +546,7 @@ export class AgentLaunchFeature implements Feature {
       "pending",
       instructions,
     );
-    const message = await interaction.editReply({
+    await interaction.editReply({
       embeds: [pendingEmbed],
     });
 
@@ -661,45 +566,6 @@ export class AgentLaunchFeature implements Feature {
       return;
     }
 
-    const statusResult = await this.cursorClient.getAgentStatus(agentId);
-
-    if (statusResult.isErr()) {
-      const { embed: errorEmbed } = this.createStatusEmbed(
-        "failed",
-        instructions,
-        undefined,
-        statusResult.error.message,
-      );
-      await interaction.editReply({ embeds: [errorEmbed] });
-      return;
-    }
-
-    const agentStatus = statusResult.value;
-    let normalizedStatus = this.normalizeStatus(agentStatus.status);
-
-    if (agentStatus.status === "FINISHED") {
-      normalizedStatus = "running";
-    }
-
-    const statusEmbedResult = this.createStatusEmbed(
-      normalizedStatus,
-      instructions,
-      agentStatus.prUrl,
-      agentStatus.status === "FAILED" ? agentStatus.summary : undefined,
-      agentStatus.id,
-    );
-
-    await interaction.editReply({
-      embeds: [statusEmbedResult.embed],
-      components: statusEmbedResult.components ?? [],
-    });
-
-    await this.pollAndUpdateStatus(
-      message.id,
-      interaction,
-      agentId,
-      instructions,
-      true,
-    );
+    await this.reportRun(interaction, followUpResult.value, instructions);
   }
 }

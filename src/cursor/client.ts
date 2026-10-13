@@ -1,169 +1,73 @@
+import { Agent, type Run, type RunResult } from "@cursor/sdk";
 import { type Logger } from "pino";
-import { err, ok, type Result } from "neverthrow";
+import { ResultAsync } from "neverthrow";
 
-export interface LaunchAgentRequest {
-  repository: string;
-  instructions: string;
-  model: string;
+const MODEL = { id: "claude-opus-5-5" };
+
+export interface StartedRun {
+  agentId: string;
+  run: Run;
 }
 
-/** Status of an agent's latest run, flattened from the v1 agent + run. */
-export interface AgentStatus {
-  id: string;
-  status: "CREATING" | "RUNNING" | "FINISHED" | "FAILED";
-  prUrl?: string;
-  summary?: string;
-}
-
-type RunStatus =
-  | "CREATING"
-  | "RUNNING"
-  | "FINISHED"
-  | "ERROR"
-  | "CANCELLED"
-  | "EXPIRED";
-
-interface Run {
-  id: string;
-  status: RunStatus;
-  result?: string;
-  git?: { branches?: Array<{ prUrl?: string }> };
-}
-
-interface Agent {
-  id: string;
-  latestRunId?: string;
-  repos?: Array<{ prUrl?: string }>;
-}
-
+/** Cloud agents on one GitHub repo, via the Cursor SDK. */
 export class CursorClient {
-  private readonly baseUrl = "https://api.cursor.com/v1";
-
   constructor(
     private readonly apiKey: string,
+    private readonly repository: string,
     private readonly logger: Logger,
   ) {}
 
-  async launchAgent(
-    request: LaunchAgentRequest,
-  ): Promise<Result<AgentStatus, Error>> {
-    const result = await this.request<{ agent: Agent; run: Run }>(
-      "POST",
-      "/agents",
-      {
-        prompt: { text: request.instructions },
-        repos: [
-          {
-            url: `https://github.com/${request.repository}`,
-            startingRef: "main",
-          },
-        ],
-        autoCreatePR: true,
-        model: { id: request.model },
-      },
-      "launch agent",
-    );
-    return result.map(({ agent, run }) => toAgentStatus(agent.id, run));
-  }
-
-  async getAgentStatus(agentId: string): Promise<Result<AgentStatus, Error>> {
-    const agentResult = await this.request<Agent>(
-      "GET",
-      `/agents/${agentId}`,
-      undefined,
-      "get agent",
-    );
-    if (agentResult.isErr()) {
-      return err(agentResult.error);
-    }
-    const runId = agentResult.value.latestRunId;
-    if (!runId) {
-      return ok({ id: agentId, status: "CREATING" });
-    }
-    const runResult = await this.request<Run>(
-      "GET",
-      `/agents/${agentId}/runs/${runId}`,
-      undefined,
-      "get agent run",
-    );
-    return runResult.map((run) => {
-      const status = toAgentStatus(agentId, run);
-      // Runs don't always carry the PR link; the agent's repo entry does.
-      const agentPrUrl = agentResult.value.repos?.find(
-        (repo) => repo.prUrl,
-      )?.prUrl;
-      if (!status.prUrl && agentPrUrl) {
-        status.prUrl = agentPrUrl;
-      }
-      return status;
+  /** Creates a cloud agent on main that opens a PR when it finishes. */
+  launchAgent(instructions: string): ResultAsync<StartedRun, Error> {
+    return this.attempt("launch agent", async () => {
+      const agent = await Agent.create({
+        apiKey: this.apiKey,
+        model: MODEL,
+        cloud: {
+          repos: [
+            {
+              url: `https://github.com/${this.repository}`,
+              startingRef: "main",
+            },
+          ],
+          autoCreatePR: true,
+        },
+      });
+      const run = await agent.send(instructions);
+      return { agentId: agent.agentId, run };
     });
   }
 
-  async addFollowUp(
+  /** Sends follow-up instructions to an existing agent as a new run. */
+  addFollowUp(
     agentId: string,
     instructions: string,
-  ): Promise<Result<{ id: string }, Error>> {
-    const result = await this.request<Run>(
-      "POST",
-      `/agents/${agentId}/runs`,
-      { prompt: { text: instructions } },
-      "add follow-up",
-    );
-    return result.map((run) => ({ id: run.id }));
+  ): ResultAsync<StartedRun, Error> {
+    return this.attempt("add follow-up", async () => {
+      const agent = await Agent.resume(agentId, {
+        apiKey: this.apiKey,
+        model: MODEL,
+      });
+      const run = await agent.send(instructions);
+      return { agentId, run };
+    });
   }
 
-  private async request<T>(
-    method: "GET" | "POST",
-    path: string,
-    body: unknown,
+  waitForRun(run: Run): ResultAsync<RunResult, Error> {
+    return this.attempt("wait for run", () => run.wait());
+  }
+
+  private attempt<T>(
     operation: string,
-  ): Promise<Result<T, Error>> {
-    try {
-      const authHeader = `Basic ${Buffer.from(`${this.apiKey}:`).toString("base64")}`;
-      const response = await fetch(`${this.baseUrl}${path}`, {
-        method,
-        headers: {
-          Authorization: authHeader,
-          ...(body !== undefined && { "Content-Type": "application/json" }),
-        },
-        ...(body !== undefined && { body: JSON.stringify(body) }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.logger.error(
-          { status: response.status, error: errorText },
-          `Failed to ${operation}`,
-        );
-        return err(
-          new Error(`Cursor API error: ${response.status} - ${errorText}`),
-        );
-      }
-
-      return ok((await response.json()) as T);
-    } catch (error) {
-      this.logger.error({ err: error }, `Error trying to ${operation}`);
-      return err(error instanceof Error ? error : new Error(String(error)));
-    }
+    action: () => Promise<T>,
+  ): ResultAsync<T, Error> {
+    return ResultAsync.fromPromise(action(), (error) => {
+      this.logger.error({ err: error }, `Cursor: failed to ${operation}`);
+      return error instanceof Error ? error : new Error(String(error));
+    });
   }
 }
 
-function toAgentStatus(agentId: string, run: Run): AgentStatus {
-  const status: AgentStatus = {
-    id: agentId,
-    status:
-      run.status === "CREATING" ||
-      run.status === "RUNNING" ||
-      run.status === "FINISHED"
-        ? run.status
-        : "FAILED",
-  };
-  const prUrl = run.git?.branches?.find((branch) => branch.prUrl)?.prUrl;
-  if (prUrl) {
-    status.prUrl = prUrl;
-  }
-  if (run.result) {
-    status.summary = run.result;
-  }
-  return status;
+export function prUrlOf(result: RunResult): string | undefined {
+  return result.git?.branches.find((branch) => branch.prUrl)?.prUrl;
 }
