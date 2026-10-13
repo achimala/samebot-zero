@@ -2,6 +2,15 @@
 
 A single-process TypeScript Discord bot. It keeps the fun conversational tone, emoji gimmicks, and meme-of-the-day posts.
 
+> [!WARNING]
+> Samebot is built for one private server of people who trust each other, and it is not safe to run in a public server. Anyone who can talk to it can:
+>
+> - start coding agents that open PRs against this repo, and merge them with one click once a GitHub token is saved
+> - run long tasks in an internet-connected sandbox, with arbitrary code and unrestricted network access, billed to your Anthropic account
+> - spend money on your API keys (Anthropic, Cursor, Gemini, OpenAI) with only per-task caps
+>
+> There are no per-user permissions. Everyone in the server can use everything.
+
 ## Models
 
 | Job | Model |
