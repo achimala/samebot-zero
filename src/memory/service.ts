@@ -89,11 +89,13 @@ export class HonchoMemoryService {
             observeOthers: true,
           },
         ],
+        // Only samebot observes others: we only ever read samebot's view of
+        // each person, and Honcho caps a session at 10 observers.
         [
           peer.id,
           {
             observeMe: true,
-            observeOthers: true,
+            observeOthers: false,
           },
         ],
       ]);

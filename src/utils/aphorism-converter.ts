@@ -74,7 +74,9 @@ Examples of the style:
 - "In patience lies strength; in haste, only regret."
 - "To understand others is wisdom; to understand oneself is enlightenment."
 
-Convert the message while preserving its essential meaning and intent.`;
+Convert the message while preserving its essential meaning and intent.
+
+Reply with exactly one aphorism, one sentence, plain text. No quotes, no formatting, no alternatives, no commentary.`;
 
   const result = await llm.chat({
     messages: [

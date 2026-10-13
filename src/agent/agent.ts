@@ -35,16 +35,15 @@ const MAX_TOOL_ITERATIONS = 10;
 /** Only the most recent image-bearing messages are shown to the model. */
 const MAX_IMAGE_MESSAGES = 4;
 
-export const PERSONA = `you are samebot, a hyper-intelligent, lowercase-talking friend in a discord group chat, with a dry, sarcastic British tone.
-you're quintessentially British - British spellings (colour, realise, organise), British expressions ("brilliant", "cheers", "bloody hell", "proper", "bit", "rather"), and British humour (dry wit, understatement, self-deprecation). you rarely use emojis and occasionally swear for comedic effect ("bloody", "bugger", "sodding").
+export const PERSONA = `you are samebot, one of the regulars in a discord group chat. you type in lowercase, you're dry and a bit sarcastic, and you're british.
 
-how much to say - match the length to what the message actually needs:
-- banter, jokes, greetings and reactions: keep it short and punchy, usually one line. don't over-explain a joke.
-- questions, requests for information, advice, explanations or help: actually answer properly. give the useful substance first - facts, specifics, steps, a recommendation - then add wit if it fits. a few sentences or a short list is fine; go longer when someone asks for detail. never swap a real answer for a snide one-liner.
-- if you don't know or aren't sure, say so plainly (and search the web when it would help).
-- this is chat, not an essay: no headings, no preamble, no restating the question, and keep it under ~1500 characters unless someone explicitly wants more.
-
-the sarcasm is seasoning, not the meal - be genuinely helpful and still sound like yourself.`;
+talk exactly like a normal person texting their friends:
+- short. usually one line, often a few words. if someone asks a real question, answer it in a sentence or two, and only go longer if they ask for detail.
+- plain everyday words. no metaphors, no imagery, no clever turns of phrase, no poetic or literary writing. if a sentence sounds like it belongs in a book, rewrite it like a text message.
+- never apologise. no "sorry", "my bad", "fair point", "you're right". if you got something wrong, just give the right thing.
+- no lists, bold, headings or markdown unless asked. no preamble, no recap, no offering alternatives, no follow-up questions.
+- don't perform britishness with stock phrases like "bloody hell", "cheers mate", "brilliant", "rather". british spelling is enough.
+- don't explain jokes, don't hedge. if you don't know, say so in a few words.`;
 
 const TOOL_INSTRUCTIONS = `Respond in lowercase only.
 
@@ -84,7 +83,9 @@ export class Agent {
     triggerMessageId: string,
   ): Promise<AgentResponse> {
     const system = await this.buildSystemPrompt(context);
-    const { messages } = toMessageParams(this.buildHistoryMessages(context));
+    const { messages } = toMessageParams(
+      await this.buildHistoryMessages(context),
+    );
     const postedMessages: AgentMessage[] = [];
 
     const result = await this.llm.runAgent({
@@ -244,12 +245,32 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
     ];
   }
 
-  private buildHistoryMessages(context: AgentContext): ChatMessage[] {
-    const imageMessageIds = new Set(
-      context.history
-        .filter((message) => message.images && message.images.length > 0)
-        .slice(-MAX_IMAGE_MESSAGES)
-        .map((message) => message.id),
+  /**
+   * Images are downloaded here rather than passed as URLs: Discord CDN links
+   * expire, and Claude rejects the whole request if it can't fetch one.
+   */
+  private async buildHistoryMessages(
+    context: AgentContext,
+  ): Promise<ChatMessage[]> {
+    const imageMessages = context.history
+      .filter((message) => message.images && message.images.length > 0)
+      .slice(-MAX_IMAGE_MESSAGES);
+    const imagesById = new Map(
+      await Promise.all(
+        imageMessages.map(async (message) => {
+          const images = await Promise.all(
+            (message.images ?? []).map((url) =>
+              fetchImageAsBase64(url, this.logger),
+            ),
+          );
+          return [
+            message.id,
+            images
+              .filter((image) => image !== null)
+              .map((image) => `data:${image.mimeType};base64,${image.data}`),
+          ] as const;
+        }),
+      ),
     );
 
     return context.history
@@ -264,8 +285,9 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
               ? message.content
               : formatHistoryLine(message),
         };
-        if (imageMessageIds.has(message.id) && message.images) {
-          chatMessage.images = message.images;
+        const images = imagesById.get(message.id);
+        if (images && images.length > 0) {
+          chatMessage.images = images;
         }
         return chatMessage;
       });

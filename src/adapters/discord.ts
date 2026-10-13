@@ -188,7 +188,13 @@ export class DiscordAdapter {
         : `<:${customEmoji.name}:${customEmoji.id}>`;
     }
 
-    return trimmed;
+    // Anything else must be a real Unicode emoji; the model sometimes invents
+    // names like "thinking" that Discord rejects with Unknown Emoji.
+    return /\p{Extended_Pictographic}|\p{Regional_Indicator}|⃣/u.test(
+      trimmed,
+    )
+      ? trimmed
+      : null;
   }
 
   async getMessageById(
