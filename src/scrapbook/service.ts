@@ -36,20 +36,21 @@ export class ScrapbookService {
 
     const result = await this.decisions.decide(
       `Recent Discord chat messages, each prefixed with its ID:\n\n${messageList}`,
-      [
-        {
+      {
+        key_message: {
           type: "choice",
-          name: "key_message",
           instructions: `Is any single message exceptionally memorable or quotable: genuinely hilarious, unexpectedly profound, or a memorable inside-joke moment worth reminiscing about later? Be very conservative; most conversations have nothing worth saving. Routine conversation, generic statements and bot messages never count. Pick its ID, or "${NO_KEY_MESSAGE}" if nothing stands out.`,
-          choices: [
-            { value: NO_KEY_MESSAGE, description: "Nothing stands out" },
-            ...candidates.map((m) => ({
-              value: m.id,
-              description: `${m.author}: ${m.content.slice(0, 200)}`,
-            })),
-          ],
+          criteria: {
+            [NO_KEY_MESSAGE]: "Nothing stands out",
+            ...Object.fromEntries(
+              candidates.map((m) => [
+                m.id,
+                `${m.author}: ${m.content.slice(0, 200)}`,
+              ]),
+            ),
+          },
         },
-      ],
+      },
     );
 
     if (result.isErr()) {
