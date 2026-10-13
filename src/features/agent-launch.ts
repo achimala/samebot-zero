@@ -82,7 +82,7 @@ export class AgentLaunchFeature implements Feature {
     const launchResult = await this.cursorClient.launchAgent({
       repository: REPOSITORY,
       instructions,
-      model: "composer-2.5",
+      model: "claude-opus-5-5",
     });
 
     if (launchResult.isErr()) {
@@ -101,7 +101,7 @@ export class AgentLaunchFeature implements Feature {
     const { embed: initialStatusEmbed, components } = this.createStatusEmbed(
       normalizedStatus,
       instructions,
-      agentStatus.target.prUrl,
+      agentStatus.prUrl,
       undefined,
       agentStatus.id,
     );
@@ -148,9 +148,9 @@ export class AgentLaunchFeature implements Feature {
 
       const status = statusResult.value;
 
-      const prUrl = status.target.prUrl ?? lastKnownPrUrl;
-      if (status.target.prUrl) {
-        lastKnownPrUrl = status.target.prUrl;
+      const prUrl = status.prUrl ?? lastKnownPrUrl;
+      if (status.prUrl) {
+        lastKnownPrUrl = status.prUrl;
       }
 
       if (isFollowUp && status.status === "RUNNING") {
@@ -173,8 +173,6 @@ export class AgentLaunchFeature implements Feature {
           status: status.status,
           prUrl,
           normalizedStatus,
-          autoCreatePr: status.target.autoCreatePr,
-          target: status.target,
           isFollowUp,
           hasSeenRunningAfterFollowUp,
         },
@@ -686,7 +684,7 @@ export class AgentLaunchFeature implements Feature {
     const statusEmbedResult = this.createStatusEmbed(
       normalizedStatus,
       instructions,
-      agentStatus.target.prUrl,
+      agentStatus.prUrl,
       agentStatus.status === "FAILED" ? agentStatus.summary : undefined,
       agentStatus.id,
     );
