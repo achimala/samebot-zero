@@ -3,6 +3,7 @@ import type { DecisionClient } from "../llm/decisions";
 import type { AgentContext, IncomingMessage } from "./types";
 
 const RESPOND_THRESHOLD = 0.6;
+const FOLLOW_UP_WINDOW_MS = 3 * 60 * 1000;
 const BRIEF_REPLY_THRESHOLD = 0.7;
 const REACT_THRESHOLD = 0.6;
 const CONTEXT_MESSAGES = 15;
@@ -48,6 +49,15 @@ export class ResponseDecision {
       );
       return false;
     }
+    // Only a live back-and-forth counts. Otherwise the first message after
+    // a scheduled post hours earlier looks like a reply to samebot.
+    if (message.timestamp - previousMessage.timestamp > FOLLOW_UP_WINDOW_MS) {
+      this.options.logger?.debug(
+        {},
+        "Not responding: samebot's last message is too old for a follow-up",
+      );
+      return false;
+    }
 
     const result = await this.options.decisions.decide(
       this.buildDecisionInput(context, message.content),
@@ -56,7 +66,7 @@ export class ResponseDecision {
           type: "predicate",
           name: "should_respond",
           instructions:
-            "Is the latest message clearly directed at samebot, or clearly expecting a reply from samebot? Answer false if people are just talking to each other or it is ambiguous who the message is for.",
+            "Does the latest message ask samebot something or need an answer from samebot? Answer false if people are just talking to each other, if it's ambiguous who the message is for, if it's only a reaction or comment (\"nice\", \"lol\", \"fair\", an opinion), or if it tells samebot to stop or be quiet.",
         },
       ],
     );

@@ -164,6 +164,40 @@ describe("ResponseDecision", () => {
         expect(typeof result).toBe("boolean");
       },
     );
+
+    it("ignores a follow-up to a samebot message from hours ago", async () => {
+      const decision = new ResponseDecision({
+        decisions: {} as DecisionClient,
+      });
+      const now = Date.now();
+      const message = createMockIncomingMessage({
+        content: "nice model",
+        timestamp: now,
+      });
+      const context: AgentContext = {
+        history: [
+          {
+            id: "msg1",
+            role: "assistant",
+            content: "image of the day",
+            timestamp: now - 3 * 60 * 60 * 1000,
+          },
+          {
+            id: "msg2",
+            role: "user",
+            content: "nice model",
+            author: "alice",
+            timestamp: now,
+          },
+        ],
+        isDm: false,
+        channelId: "channel123",
+      };
+
+      const result = await decision.shouldRespond(message, context);
+
+      expect(result).toBe(false);
+    });
   });
 
   describe("buildConversationContext", () => {
