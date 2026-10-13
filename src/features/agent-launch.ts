@@ -19,6 +19,12 @@ import { CursorClient, prUrlOf, type StartedRun } from "../cursor/client";
 
 const REPOSITORY = "achimala/samebot-zero";
 
+type StatusPayload = {
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<ButtonBuilder>[];
+};
+type StatusUpdate = (payload: StatusPayload) => Promise<unknown>;
+
 interface PendingMergeData {
   channelId: string;
   messageId: string;
@@ -67,77 +73,110 @@ export class AgentLaunchFeature implements Feature {
 
   private async handleAgentLaunch(interaction: ChatInputCommandInteraction) {
     const instructions = interaction.options.getString("instructions", true);
-
     await interaction.deferReply();
-
-    const { embed: initialEmbed } = this.createStatusEmbed(
-      "pending",
-      instructions,
+    await this.launch(instructions, instructions, (payload) =>
+      interaction.editReply(payload),
     );
-    await interaction.editReply({
-      embeds: [initialEmbed],
-    });
+  }
 
-    const launchResult =
-      await this.cursorClient.launchAgent(instructions);
-    if (launchResult.isErr()) {
-      const { embed: errorEmbed } = this.createStatusEmbed(
-        "failed",
-        instructions,
-        undefined,
-        launchResult.error.message,
-      );
-      await interaction.editReply({ embeds: [errorEmbed] });
-      return;
+  /**
+   * Starts an agent from a chat request and posts its status embed to the
+   * channel. Resolves once the agent has started; the run is tracked in the
+   * background.
+   */
+  async launchFromChat(
+    channelId: string,
+    task: string,
+    prompt: string,
+  ): Promise<string> {
+    const channel = await this.ctx.discord.channels.fetch(channelId);
+    if (!channel || !channel.isSendable()) {
+      return "Could not post to this channel.";
     }
+    let message: Message | undefined;
+    const update: StatusUpdate = async (payload) => {
+      if (message) {
+        await message.edit(payload);
+      } else {
+        message = await channel.send(payload);
+      }
+    };
+    return new Promise((resolve) => {
+      void this.launch(task, prompt, update, resolve);
+    });
+  }
 
-    await this.reportRun(interaction, launchResult.value, instructions);
+  /**
+   * Launches an agent and keeps its status embed up to date. `onStarted`
+   * fires as soon as the launch succeeds or fails.
+   */
+  private async launch(
+    task: string,
+    prompt: string,
+    update: StatusUpdate,
+    onStarted?: (outcome: string) => void,
+  ) {
+    try {
+      await update(this.statusPayload("pending", task));
+
+      const launchResult = await this.cursorClient.launchAgent(prompt);
+      if (launchResult.isErr()) {
+        onStarted?.(`Failed to start agent: ${launchResult.error.message}`);
+        await update(
+          this.statusPayload("failed", task, undefined, launchResult.error.message),
+        );
+        return;
+      }
+      onStarted?.(
+        "Started a coding agent; its status and PR link are posted in the channel.",
+      );
+      await this.reportRun(update, launchResult.value, task);
+    } catch (error) {
+      this.ctx.logger.error({ err: error }, "Agent launch failed");
+      onStarted?.("Failed to start agent.");
+    }
   }
 
   /** Shows the run as running, then waits for it and shows the outcome. */
   private async reportRun(
-    interaction: ChatInputCommandInteraction | ModalSubmitInteraction,
+    update: StatusUpdate,
     { agentId, run }: StartedRun,
-    instructions: string,
+    task: string,
   ) {
-    const { embed: runningEmbed } = this.createStatusEmbed(
-      "running",
-      instructions,
-    );
-    await interaction.editReply({ embeds: [runningEmbed] });
+    await update(this.statusPayload("running", task));
 
     const result = await this.cursorClient.waitForRun(run);
     if (result.isErr()) {
-      const { embed: errorEmbed } = this.createStatusEmbed(
-        "failed",
-        instructions,
-        undefined,
-        result.error.message,
+      await update(
+        this.statusPayload("failed", task, undefined, result.error.message),
       );
-      await interaction.editReply({ embeds: [errorEmbed] });
       return;
     }
 
     const { status, error } = result.value;
-    const { embed, components } =
+    await update(
       status === "finished"
-        ? this.createStatusEmbed(
+        ? this.statusPayload(
             "completed",
-            instructions,
+            task,
             prUrlOf(result.value),
             undefined,
             agentId,
           )
-        : this.createStatusEmbed(
+        : this.statusPayload(
             "failed",
-            instructions,
+            task,
             undefined,
             error?.message ?? `Agent run ${status}`,
-          );
-    await interaction.editReply({
-      embeds: [embed],
-      components: components ?? [],
-    });
+          ),
+    );
+  }
+
+  private statusPayload(
+    ...args: Parameters<AgentLaunchFeature["createStatusEmbed"]>
+  ): StatusPayload {
+    const { embed, components } = this.createStatusEmbed(...args);
+    return { embeds: [embed], components: components ?? [] };
   }
 
   private createStatusEmbed(
@@ -149,7 +188,7 @@ export class AgentLaunchFeature implements Feature {
   ): { embed: EmbedBuilder; components?: ActionRowBuilder<ButtonBuilder>[] } {
     const embed = new EmbedBuilder()
       .setTitle("Cursor Agent")
-      .setDescription(`**Instructions:** ${instructions}`)
+      .setDescription(`**Instructions:** ${instructions}`.slice(0, 4096))
       .setColor(this.getStatusColor(status))
       .setTimestamp();
 
@@ -541,31 +580,25 @@ export class AgentLaunchFeature implements Feature {
     );
 
     await interaction.deferReply();
-
-    const { embed: pendingEmbed } = this.createStatusEmbed(
-      "pending",
-      instructions,
-    );
-    await interaction.editReply({
-      embeds: [pendingEmbed],
-    });
+    const update: StatusUpdate = (payload) => interaction.editReply(payload);
+    await update(this.statusPayload("pending", instructions));
 
     const followUpResult = await this.cursorClient.addFollowUp(
       agentId,
       instructions,
     );
-
     if (followUpResult.isErr()) {
-      const { embed: errorEmbed } = this.createStatusEmbed(
-        "failed",
-        instructions,
-        undefined,
-        followUpResult.error.message,
+      await update(
+        this.statusPayload(
+          "failed",
+          instructions,
+          undefined,
+          followUpResult.error.message,
+        ),
       );
-      await interaction.editReply({ embeds: [errorEmbed] });
       return;
     }
 
-    await this.reportRun(interaction, followUpResult.value, instructions);
+    await this.reportRun(update, followUpResult.value, instructions);
   }
 }

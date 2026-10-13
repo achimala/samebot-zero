@@ -118,6 +118,7 @@ export class ConversationFeature implements Feature {
       context.logger,
       context.customEmoji,
       this.adapter,
+      context.agentLauncher,
     );
 
     this.responseDecision = new ResponseDecision({

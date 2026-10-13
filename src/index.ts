@@ -54,6 +54,7 @@ async function main() {
   const scrapbookService = new ScrapbookService(scrapbookStore, decisions, logger);
 
   const conversationFeature = new ConversationFeature();
+  const agentLaunchFeature = new AgentLaunchFeature();
 
   const runtime = {
     config,
@@ -67,6 +68,7 @@ async function main() {
     memory: memoryService,
     scrapbook: scrapbookService,
     conversation: conversationFeature,
+    agentLauncher: agentLaunchFeature,
     customEmoji: gateway.getCustomEmoji(),
   };
 
@@ -74,7 +76,7 @@ async function main() {
     conversationFeature,
     new ImageCommandFeature(),
     new ImageOfDayFeature(),
-    new AgentLaunchFeature(),
+    agentLaunchFeature,
     new DankResponseFeature(),
     new UsaCowboyFeature(),
     new SamebotEmojiFeature(),

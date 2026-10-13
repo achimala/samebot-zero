@@ -18,6 +18,7 @@ import type { ScrapbookMemory } from "../scrapbook/store";
 import type { SupabaseClient } from "../supabase/client";
 import type { EntityResolver } from "../utils/entity-resolver";
 import type { DiscordAdapter } from "../adapters/discord";
+import type { AgentLaunchFeature } from "../features/agent-launch";
 import type { AgentContext, AgentMessage, AgentResponse } from "./types";
 import {
   processVideoToGif,
@@ -78,6 +79,7 @@ export class Agent {
     private readonly logger: Logger,
     private readonly customEmoji: Map<string, GuildEmoji>,
     private readonly adapter: DiscordAdapter,
+    private readonly agentLauncher?: AgentLaunchFeature,
   ) {}
 
   async generateResponse(
@@ -446,6 +448,30 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
           }
           recordPost(sendResult.messageId, contextMessage);
           return `Posted context for "${memory.keyMessage}" to channel`;
+        },
+      }),
+      betaZodTool({
+        name: "launch_coding_agent",
+        description:
+          "Start a coding agent on your own codebase (samebot). It reads your prod logs, makes the change and opens a PR; its status and PR link post to the channel, and people merge it from there. Use when someone asks you to fix a bug in yourself, change how you behave, or add a feature. Not for anything else.",
+        inputSchema: z.object({
+          task: z
+            .string()
+            .describe(
+              "What to fix or build, in plain words: what went wrong (or what's wanted) and what should happen instead.",
+            ),
+        }),
+        run: async ({ task }) => {
+          if (!this.agentLauncher) {
+            return "Coding agents aren't available.";
+          }
+          const prompt = `${task}
+
+This request came from samebot's Discord chat at ${DateTime.now().toISO()}. If it's about something that went wrong, check the prod logs on Render around that time (see AGENTS.md) before changing code.
+
+Recent chat, oldest first ("samebot" is the bot):
+${this.formatContextText(context)}`;
+          return this.agentLauncher.launchFromChat(channelId, task, prompt);
         },
       }),
       betaZodTool({

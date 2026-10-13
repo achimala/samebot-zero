@@ -7,6 +7,7 @@ import type { GeminiClient } from "../gemini/client";
 import type { DiscordMessenger } from "../discord/messenger";
 import type { SupabaseClient } from "../supabase/client";
 import type { ConversationFeature } from "../features/conversation";
+import type { AgentLaunchFeature } from "../features/agent-launch";
 import type { HonchoMemoryService } from "../memory/service";
 import type { ScrapbookService } from "../scrapbook/service";
 
@@ -22,6 +23,7 @@ export interface RuntimeContext {
   memory: HonchoMemoryService;
   scrapbook: ScrapbookService;
   conversation?: ConversationFeature;
+  agentLauncher?: AgentLaunchFeature;
   customEmoji: Map<string, GuildEmoji>;
 }
 
