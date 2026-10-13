@@ -4,6 +4,13 @@ import { ResultAsync } from "neverthrow";
 
 const MODEL = { id: "claude-opus-5-5" };
 
+export interface AgentSummary {
+  agentId: string;
+  name: string;
+  status: string;
+  prUrl?: string;
+}
+
 export interface StartedRun {
   agentId: string;
   run: Run;
@@ -55,6 +62,64 @@ export class CursorClient {
 
   waitForRun(run: Run): ResultAsync<RunResult, Error> {
     return this.attempt("wait for run", () => run.wait());
+  }
+
+  /** Recent agents on this repo, newest first, with their latest PR link. */
+  listAgents(limit = 8): ResultAsync<AgentSummary[], Error> {
+    return this.attempt("list agents", async () => {
+      const { items } = await Agent.list({
+        runtime: "cloud",
+        apiKey: this.apiKey,
+        limit: 25,
+      });
+      const ours = items
+        .filter(
+          (agent) =>
+            agent.runtime === "cloud" &&
+            agent.repos?.some((repo) => repo.includes(this.repository)),
+        )
+        .slice(0, limit);
+      return Promise.all(
+        ours.map(async (agent) => {
+          const run = await this.latestRun(agent.agentId);
+          const summary: AgentSummary = {
+            agentId: agent.agentId,
+            name: agent.name,
+            status: run?.status ?? agent.status ?? "unknown",
+          };
+          const prUrl = run?.git?.branches.find((branch) => branch.prUrl)?.prUrl;
+          if (prUrl) {
+            summary.prUrl = prUrl;
+          }
+          return summary;
+        }),
+      );
+    });
+  }
+
+  /** Cancels the agent's run if one is in progress. Returns whether it was. */
+  cancelAgent(agentId: string): ResultAsync<boolean, Error> {
+    return this.attempt("cancel agent", async () => {
+      const run = await this.latestRun(agentId);
+      if (!run || run.status !== "running") {
+        return false;
+      }
+      await Agent.cancelRun(run.id, {
+        runtime: "cloud",
+        agentId,
+        apiKey: this.apiKey,
+      });
+      return true;
+    });
+  }
+
+  private async latestRun(agentId: string): Promise<Run | undefined> {
+    const { items } = await Agent.listRuns(agentId, {
+      runtime: "cloud",
+      apiKey: this.apiKey,
+      limit: 1,
+    });
+    return items[0];
   }
 
   private attempt<T>(

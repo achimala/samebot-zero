@@ -14,6 +14,7 @@ import {
   TextInputStyle,
 } from "discord.js";
 import { Octokit } from "@octokit/rest";
+import type { ResultAsync } from "neverthrow";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import { CursorClient, prUrlOf, type StartedRun } from "../cursor/client";
 
@@ -74,8 +75,10 @@ export class AgentLaunchFeature implements Feature {
   private async handleAgentLaunch(interaction: ChatInputCommandInteraction) {
     const instructions = interaction.options.getString("instructions", true);
     await interaction.deferReply();
-    await this.launch(instructions, instructions, (payload) =>
-      interaction.editReply(payload),
+    await this.launch(
+      instructions,
+      () => this.cursorClient.launchAgent(instructions),
+      (payload) => interaction.editReply(payload),
     );
   }
 
@@ -84,10 +87,80 @@ export class AgentLaunchFeature implements Feature {
    * channel. Resolves once the agent has started; the run is tracked in the
    * background.
    */
-  async launchFromChat(
+  launchFromChat(channelId: string, task: string, prompt: string) {
+    return this.startFromChat(channelId, task, () =>
+      this.cursorClient.launchAgent(prompt),
+    );
+  }
+
+  /** Sends follow-up instructions to an existing agent, posting a new status embed. */
+  followUpFromChat(channelId: string, agentId: string, instructions: string) {
+    return this.startFromChat(channelId, instructions, () =>
+      this.cursorClient.addFollowUp(agentId, instructions),
+    );
+  }
+
+  async listAgentsForChat(): Promise<string> {
+    const result = await this.cursorClient.listAgents();
+    if (result.isErr()) {
+      return `Failed to list agents: ${result.error.message}`;
+    }
+    if (result.value.length === 0) {
+      return "No recent coding agents.";
+    }
+    return result.value
+      .map(
+        (agent) =>
+          `${agent.agentId} [${agent.status}] ${agent.name}${agent.prUrl ? ` - ${agent.prUrl}` : ""}`,
+      )
+      .join("\n");
+  }
+
+  async cancelAgentForChat(agentId: string): Promise<string> {
+    const result = await this.cursorClient.cancelAgent(agentId);
+    if (result.isErr()) {
+      return `Failed to cancel: ${result.error.message}`;
+    }
+    return result.value ? "Cancelled." : "That agent wasn't running.";
+  }
+
+  /** Closes a PR on this repo with the requester's saved GitHub token. */
+  async closePrForChat(
+    discordUserId: string | undefined,
+    prNumber: number,
+  ): Promise<string> {
+    const token = discordUserId
+      ? await this.ctx.supabase.getGitHubToken(discordUserId)
+      : null;
+    if (!token) {
+      return "That person has no GitHub token saved. They can add one by pressing Merge PR on an agent's status card once.";
+    }
+    const [owner, repo] = REPOSITORY.split("/") as [string, string];
+    const github = new Octokit({ auth: token });
+    try {
+      const pr = await github.pulls.update({
+        owner,
+        repo,
+        pull_number: prNumber,
+        state: "closed",
+      });
+      await github.git
+        .deleteRef({ owner, repo, ref: `heads/${pr.data.head.ref}` })
+        .catch(() => undefined);
+      return `Closed PR #${prNumber}.`;
+    } catch (error) {
+      return `Failed to close PR #${prNumber}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  /**
+   * Starts an agent run from chat and posts its status embed to the channel.
+   * Resolves once the run has started; it's tracked in the background.
+   */
+  private async startFromChat(
     channelId: string,
     task: string,
-    prompt: string,
+    start: () => ResultAsync<StartedRun, Error>,
   ): Promise<string> {
     const channel = await this.ctx.discord.channels.fetch(channelId);
     if (!channel || !channel.isSendable()) {
@@ -102,7 +175,7 @@ export class AgentLaunchFeature implements Feature {
       }
     };
     return new Promise((resolve) => {
-      void this.launch(task, prompt, update, resolve);
+      void this.launch(task, start, update, resolve);
     });
   }
 
@@ -112,14 +185,14 @@ export class AgentLaunchFeature implements Feature {
    */
   private async launch(
     task: string,
-    prompt: string,
+    start: () => ResultAsync<StartedRun, Error>,
     update: StatusUpdate,
     onStarted?: (outcome: string) => void,
   ) {
     try {
       await update(this.statusPayload("pending", task));
 
-      const launchResult = await this.cursorClient.launchAgent(prompt);
+      const launchResult = await start();
       if (launchResult.isErr()) {
         onStarted?.(`Failed to start agent: ${launchResult.error.message}`);
         await update(
@@ -128,7 +201,7 @@ export class AgentLaunchFeature implements Feature {
         return;
       }
       onStarted?.(
-        "Started a coding agent; its status and PR link are posted in the channel.",
+        "Started; its status and PR link are posted in the channel. Don't repeat that.",
       );
       await this.reportRun(update, launchResult.value, task);
     } catch (error) {
