@@ -19,6 +19,7 @@ import type { SupabaseClient } from "../supabase/client";
 import type { EntityResolver } from "../utils/entity-resolver";
 import type { DiscordAdapter } from "../adapters/discord";
 import type { AgentLaunchFeature } from "../features/agent-launch";
+import type { TaskFeature } from "../features/tasks";
 import type { AgentContext, AgentMessage, AgentResponse } from "./types";
 import {
   processVideoToGif,
@@ -80,6 +81,7 @@ export class Agent {
     private readonly customEmoji: Map<string, GuildEmoji>,
     private readonly adapter: DiscordAdapter,
     private readonly agentLauncher?: AgentLaunchFeature,
+    private readonly tasks?: TaskFeature,
   ) {}
 
   async generateResponse(
@@ -472,6 +474,31 @@ This request came from samebot's Discord chat at ${DateTime.now().toISO()}. If i
 Recent chat, oldest first ("samebot" is the bot):
 ${this.formatContextText(context)}`;
           return this.agentLauncher.launchFromChat(channelId, task, prompt);
+        },
+      }),
+      betaZodTool({
+        name: "start_task",
+        description:
+          "Hand a longer job to a background agent with its own computer: a Linux sandbox with internet, Python and a shell, that can run code, read lots of web pages and make files. Use it for work that takes many steps: research across many sources, data analysis, running code, making charts, spreadsheets or documents. It works in a thread off the request, people can reply there to steer it, and the result posts back here when done. Not for quick questions you can answer yourself or with one search, and not for changes to your own code (use launch_coding_agent).",
+        inputSchema: z.object({
+          title: z
+            .string()
+            .describe("A short name for the task, used as the thread title (under 60 characters)."),
+          task: z
+            .string()
+            .describe(
+              "Full instructions for the agent: what to do, what the result should be, and any details from the chat it needs.",
+            ),
+        }),
+        run: async ({ title, task }) => {
+          if (!this.tasks) {
+            return "Tasks aren't available.";
+          }
+          const prompt = `${task}
+
+Recent chat this came from, oldest first ("samebot" is the bot):
+${this.formatContextText(context)}`;
+          return this.tasks.startTask(channelId, triggerMessageId, title, prompt);
         },
       }),
       betaZodTool({

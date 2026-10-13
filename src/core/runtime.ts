@@ -8,6 +8,7 @@ import type { DiscordMessenger } from "../discord/messenger";
 import type { SupabaseClient } from "../supabase/client";
 import type { ConversationFeature } from "../features/conversation";
 import type { AgentLaunchFeature } from "../features/agent-launch";
+import type { TaskFeature } from "../features/tasks";
 import type { HonchoMemoryService } from "../memory/service";
 import type { ScrapbookService } from "../scrapbook/service";
 
@@ -24,6 +25,7 @@ export interface RuntimeContext {
   scrapbook: ScrapbookService;
   conversation?: ConversationFeature;
   agentLauncher?: AgentLaunchFeature;
+  tasks?: TaskFeature;
   customEmoji: Map<string, GuildEmoji>;
 }
 

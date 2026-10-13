@@ -232,7 +232,7 @@ export class DiscordMessenger {
   }
 }
 
-function chunkMessage(content: string) {
+export function chunkMessage(content: string) {
   if (content.length <= DISCORD_LIMIT) {
     return [content];
   }

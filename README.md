@@ -13,6 +13,8 @@ A single-process TypeScript Discord bot. It keeps the fun conversational tone, e
 | Yes/no and pick-one decisions (should reply, should react, scrapbook detection, aphorism check) | OpenAI Decisions API (`gpt-6-luna`) |
 | Images | Gemini `gemini-3.1-flash-lite-image` (interactive), `gemini-nano-banana-2.1` (scheduled) |
 | Video / GIFs | Gemini `gemini-omni-1.1-flash` |
+| Long-running tasks (sandbox, threads) | Claude Opus 5.5 on Claude Managed Agents |
+| Code changes (`/agent`, chat requests) | Claude Opus 5.5 on Cursor cloud agents |
 | Long-term memory | Honcho |
 
 LLM clients live in `src/llm/` (`claude.ts`, `decisions.ts`).

@@ -119,6 +119,7 @@ export class ConversationFeature implements Feature {
       context.customEmoji,
       this.adapter,
       context.agentLauncher,
+      context.tasks,
     );
 
     this.responseDecision = new ResponseDecision({
@@ -169,6 +170,10 @@ export class ConversationFeature implements Feature {
 
   private async handleMessage(message: Message) {
     if (message.author.bot || message.system) {
+      return;
+    }
+    // Task threads belong to the task agent; replies there steer it.
+    if (this.ctx.tasks?.isTaskThread(message.channelId)) {
       return;
     }
     if (!message.inGuild() && !message.channel.isDMBased()) {

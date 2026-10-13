@@ -13,6 +13,7 @@ import { ConversationFeature } from "./features/conversation";
 import { ImageCommandFeature } from "./features/image-command";
 import { ImageOfDayFeature } from "./features/image-of-day";
 import { AgentLaunchFeature } from "./features/agent-launch";
+import { TaskFeature } from "./features/tasks";
 import { DankResponseFeature } from "./features/dank-response";
 import { UsaCowboyFeature } from "./features/usa-cowboy";
 import { SamebotEmojiFeature } from "./features/samebot-emoji";
@@ -55,6 +56,7 @@ async function main() {
 
   const conversationFeature = new ConversationFeature();
   const agentLaunchFeature = new AgentLaunchFeature();
+  const taskFeature = new TaskFeature();
 
   const runtime = {
     config,
@@ -69,6 +71,7 @@ async function main() {
     scrapbook: scrapbookService,
     conversation: conversationFeature,
     agentLauncher: agentLaunchFeature,
+    tasks: taskFeature,
     customEmoji: gateway.getCustomEmoji(),
   };
 
@@ -77,6 +80,7 @@ async function main() {
     new ImageCommandFeature(),
     new ImageOfDayFeature(),
     agentLaunchFeature,
+    taskFeature,
     new DankResponseFeature(),
     new UsaCowboyFeature(),
     new SamebotEmojiFeature(),
