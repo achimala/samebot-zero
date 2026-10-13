@@ -95,8 +95,8 @@ export class Agent {
         ...this.buildTools(context, triggerMessageId, postedMessages),
         WEB_SEARCH_TOOL,
       ],
-      // Medium effort: replies range from banter to real answers, and the
-      // latter need care. Up-front thinking stays off for latency.
+      // Haiku: replies are short chat, and bigger models over-write them.
+      model: "haiku",
       effort: "medium",
       maxIterations: MAX_TOOL_ITERATIONS,
       maxTokens: 2048,
