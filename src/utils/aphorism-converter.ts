@@ -29,14 +29,16 @@ export async function shouldConvertToAphorism(
     return false;
   }
 
-  const decision = await decisions.decide(`Chat message: ${message}`, [
-    {
-      type: "predicate",
-      name: "has_substance",
-      instructions:
-        "Does this chat message have real substance (an idea, opinion, or statement), as opposed to being trivial filler like 'hi', 'lol', or 'ok'?",
+  const decision = await decisions.decide(`Chat message: ${message}`, {
+    has_substance: {
+      type: "noul",
+      instructions: "Does this chat message have real substance?",
+      criteria: {
+        true: "It expresses an idea, opinion, or statement.",
+        false: "It's trivial filler like 'hi', 'lol', or 'ok'.",
+      },
     },
-  ]);
+  });
 
   return decision.match(
     (answers) => {

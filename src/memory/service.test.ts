@@ -30,7 +30,7 @@ const testConfig: AppConfig = {
   discordToken: "",
   discordAppId: "",
   anthropicApiKey: "",
-  openAIApiKey: "",
+  openRouterApiKey: "",
   googleApiKey: "",
   cursorApiKey: "",
   supabaseUrl: "",

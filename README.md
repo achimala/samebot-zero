@@ -7,7 +7,7 @@ A single-process TypeScript Discord bot. It keeps the fun conversational tone, e
 >
 > - start coding agents that open PRs against this repo, and merge them with one click once a GitHub token is saved
 > - run long tasks in an internet-connected sandbox, with arbitrary code and unrestricted network access, billed to your Anthropic account
-> - spend money on your API keys (Anthropic, Cursor, Gemini, OpenAI) with only per-task caps
+> - spend money on your API keys (Anthropic, Cursor, Gemini, OpenRouter) with only per-task caps
 >
 > There are no per-user permissions. Everyone in the server can use everything.
 
@@ -19,7 +19,7 @@ A single-process TypeScript Discord bot. It keeps the fun conversational tone, e
 | Quick text jobs (emoji picks, names, brief replies) | Claude Haiku 5.5 |
 | Creative prompt writing (scrapbook art, robot emoji) | Claude Sonnet 5.5 |
 | Image of the day ideation | Claude Opus 5.5 |
-| Yes/no and pick-one decisions (should reply, should react, scrapbook detection, aphorism check) | OpenAI Decisions API (`gpt-6-luna`) |
+| Yes/no and pick-one decisions (should reply, should react, scrapbook detection, aphorism check) | TypeSafe Jev (`~typesafe/jev-latest`) via OpenRouter's Decisions API |
 | Images | Gemini `gemini-3.1-flash-lite-image` (interactive), `gemini-nano-banana-2.1` (scheduled) |
 | Video / GIFs | Gemini `gemini-omni-1.1-flash` |
 | Long-running tasks (sandbox, threads) | Claude Opus 5.5 on Claude Managed Agents |
@@ -32,7 +32,7 @@ LLM clients live in `src/llm/` (`claude.ts`, `decisions.ts`).
 
 - **Conversation brain** – persona-aware replies for guild channels and DMs with smart mention/follow-up heuristics.
 - **Slash utilities** – `/img` generates art with Gemini, `/debug` dumps the live context for the current channel.
-- **Auto-react + reaction echo** – the Decisions API decides when to react, Claude picks the emoji.
+- **Auto-react + reaction echo** – Jev decides when to react, Claude picks the emoji.
 - **Image of the day** – daily meme prompt + caption scheduled for 8am America/Los_Angeles sent to a configurable channel.
 - **Single process** – Discord gateway, schedulers, and model access all run inside one Node process with strict typing and `neverthrow` results.
 
@@ -45,7 +45,7 @@ LLM clients live in `src/llm/` (`claude.ts`, `decisions.ts`).
 2. **Configure environment** – copy `.env.example` to `.env` and fill in values:
    - `DISCORD_TOKEN`, `DISCORD_APP_ID`
    - `ANTHROPIC_API_KEY`
-   - `OPENAI_API_KEY` (Decisions API only)
+   - `OPENROUTER_API_KEY` (decisions only)
    - `GOOGLE_API_KEY` (Gemini images/video)
    - `MAIN_CHANNEL_ID` (bot's home channel)
    - `IMAGE_OF_DAY_CHANNEL_ID` (defaults to `MAIN_CHANNEL_ID` if omitted)
@@ -67,5 +67,5 @@ LLM clients live in `src/llm/` (`claude.ts`, `decisions.ts`).
 - Lint & tests:
   ```bash
   pnpm lint
-  pnpm test   # Decisions tests hit the live API when OPENAI_API_KEY is set
+  pnpm test   # Decisions tests hit the live API when OPENROUTER_API_KEY is set
   ```

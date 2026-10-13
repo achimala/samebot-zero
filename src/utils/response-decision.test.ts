@@ -27,13 +27,13 @@ function createMockIncomingMessage(options: {
 }
 
 function createDecisionClient(): DecisionClient | null {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return null;
   }
   const logger = createLogger("silent");
   return new DecisionClient(
-    { openAIApiKey: apiKey } as AppConfig,
+    { openRouterApiKey: apiKey },
     logger,
   );
 }
@@ -164,151 +164,90 @@ describe("ResponseDecision", () => {
         expect(typeof result).toBe("boolean");
       },
     );
+
+    it("ignores a follow-up to a samebot message from hours ago", async () => {
+      const decision = new ResponseDecision({
+        decisions: {} as DecisionClient,
+      });
+      const now = Date.now();
+      const message = createMockIncomingMessage({
+        content: "nice model",
+        timestamp: now,
+      });
+      const context: AgentContext = {
+        history: [
+          {
+            id: "msg1",
+            role: "assistant",
+            content: "image of the day",
+            timestamp: now - 3 * 60 * 60 * 1000,
+          },
+          {
+            id: "msg2",
+            role: "user",
+            content: "nice model",
+            author: "alice",
+            timestamp: now,
+          },
+        ],
+        isDm: false,
+        channelId: "channel123",
+      };
+
+      const result = await decision.shouldRespond(message, context);
+
+      expect(result).toBe(false);
+    });
   });
 
-  describe("buildConversationContext", () => {
-    it("formats conversation with timing information", () => {
-      if (!decisionClient) {
-        return;
-      }
-      const decision = new ResponseDecision({ decisions: decisionClient });
+  describe("buildRecentMessages", () => {
+    const decision = new ResponseDecision({ decisions: {} as DecisionClient });
+
+    it("lists messages oldest first with author and age", () => {
       const now = Date.now();
       const context: AgentContext = {
         history: [
-          {
-            id: "msg1",
-            role: "user",
-            content: "hello",
-            author: "alice",
-            timestamp: now - 5000,
-          },
-          {
-            id: "msg2",
-            role: "assistant",
-            content: "hi there",
-            timestamp: now - 3000,
-          },
-          {
-            id: "msg3",
-            role: "user",
-            content: "what's up",
-            author: "bob",
-            timestamp: now - 1000,
-          },
+          { id: "msg1", role: "user", content: "hello", author: "alice", timestamp: now - 5000 },
+          { id: "msg2", role: "assistant", content: "hi there", timestamp: now - 3000 },
+          { id: "msg3", role: "user", content: "what's up", author: "bob", timestamp: now },
         ],
         isDm: false,
         channelId: "channel123",
       };
 
-      const result = decision.buildConversationContext(context);
+      const result = decision.buildRecentMessages(context);
 
-      expect(result).toContain("alice: hello");
-      expect(result).toContain("samebot: hi there");
-      expect(result).toContain("bob: what's up");
-      expect(result).toMatch(/\[\d+s ago\]/);
+      expect(result.map((m) => `${m.author}: ${m.text}`)).toEqual([
+        "alice: hello",
+        "samebot: hi there",
+        "bob: what's up",
+      ]);
+      expect(result[0]?.seconds_ago).toBeGreaterThanOrEqual(4);
+      expect(result[2]?.seconds_ago).toBeLessThanOrEqual(1);
     });
 
-    it("handles minutes ago format", () => {
-      if (!decisionClient) {
-        return;
-      }
-      const decision = new ResponseDecision({ decisions: decisionClient });
+    it("skips samebot's silent turns", () => {
       const now = Date.now();
       const context: AgentContext = {
         history: [
-          {
-            id: "msg1",
-            role: "user",
-            content: "hello",
-            author: "alice",
-            timestamp: now - 120000,
-          },
+          { id: "msg1", role: "assistant", content: "(silent)", timestamp: now },
+          { id: "msg2", role: "user", content: "hi", author: "bob", timestamp: now },
         ],
         isDm: false,
         channelId: "channel123",
       };
 
-      const result = decision.buildConversationContext(context);
-
-      expect(result).toMatch(/\[\d+m ago\]/);
-    });
-
-    it("handles hours ago format", () => {
-      if (!decisionClient) {
-        return;
-      }
-      const decision = new ResponseDecision({ decisions: decisionClient });
-      const now = Date.now();
-      const context: AgentContext = {
-        history: [
-          {
-            id: "msg1",
-            role: "user",
-            content: "hello",
-            author: "alice",
-            timestamp: now - 7200000,
-          },
-        ],
-        isDm: false,
-        channelId: "channel123",
-      };
-
-      const result = decision.buildConversationContext(context);
-
-      expect(result).toMatch(/\[\d+h ago\]/);
-    });
-
-    it("includes all messages with timestamps", () => {
-      if (!decisionClient) {
-        return;
-      }
-      const decision = new ResponseDecision({ decisions: decisionClient });
-      const now = Date.now();
-      const context: AgentContext = {
-        history: [
-          {
-            id: "msg1",
-            role: "user",
-            content: "hello",
-            author: "alice",
-            timestamp: now - 5000,
-          },
-          {
-            id: "msg2",
-            role: "user",
-            content: "hi",
-            author: "bob",
-            timestamp: now - 3000,
-          },
-        ],
-        isDm: false,
-        channelId: "channel123",
-      };
-
-      const result = decision.buildConversationContext(context);
-
-      expect(result).toContain("alice: hello");
-      expect(result).toContain("bob: hi");
+      expect(decision.buildRecentMessages(context)).toHaveLength(1);
     });
 
     it("handles empty context", () => {
-      if (!decisionClient) {
-        return;
-      }
-      const decision = new ResponseDecision({ decisions: decisionClient });
-      const context: AgentContext = {
-        history: [],
-        isDm: false,
-        channelId: "channel123",
-      };
+      const context: AgentContext = { history: [], isDm: false, channelId: "channel123" };
 
-      const result = decision.buildConversationContext(context);
-
-      expect(result).toBe("");
+      expect(decision.buildRecentMessages(context)).toEqual([]);
     });
   });
 
-  describe("simulated conversations with the Decisions API", () => {
+  describe("simulated conversations with Jev", () => {
     (hasDecisions ? it.concurrent : it.concurrent.skip)(
       "should respond when user asks direct question to bot in active conversation",
       async () => {

@@ -9,7 +9,7 @@ const testConfig: AppConfig = {
   discordToken: "",
   discordAppId: "",
   anthropicApiKey: "",
-  openAIApiKey: "unused",
+  openRouterApiKey: "unused",
   googleApiKey: "",
   cursorApiKey: "",
   supabaseUrl: "",

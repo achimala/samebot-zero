@@ -3,9 +3,13 @@ import type { DecisionClient } from "../llm/decisions";
 import type { AgentContext, IncomingMessage } from "./types";
 
 const RESPOND_THRESHOLD = 0.6;
+const FOLLOW_UP_WINDOW_MS = 3 * 60 * 1000;
 const BRIEF_REPLY_THRESHOLD = 0.7;
 const REACT_THRESHOLD = 0.6;
 const CONTEXT_MESSAGES = 15;
+
+const SETTING =
+  "A Discord group chat of friends. samebot is a dry, sarcastic bot in the chat. People find it annoying when it chimes in uninvited, so it should only speak when someone actually wants something from it.";
 
 export interface ResponseDecisionOptions {
   decisions: DecisionClient;
@@ -13,8 +17,15 @@ export interface ResponseDecisionOptions {
   logger?: Logger;
 }
 
+/** A chat message as the decision model sees it. */
+export interface DecisionMessage {
+  author: string;
+  seconds_ago: number;
+  text: string;
+}
+
 /**
- * Cheap routing decisions for incoming messages, backed by the Decisions API
+ * Cheap routing decisions for incoming messages, backed by a decision model
  * rather than a chat model. Every method fails closed (no reply / no react).
  */
 export class ResponseDecision {
@@ -48,25 +59,38 @@ export class ResponseDecision {
       );
       return false;
     }
+    // Only a live back-and-forth counts. Otherwise the first message after
+    // a scheduled post hours earlier looks like a reply to samebot.
+    if (message.timestamp - previousMessage.timestamp > FOLLOW_UP_WINDOW_MS) {
+      this.options.logger?.debug(
+        {},
+        "Not responding: samebot's last message is too old for a follow-up",
+      );
+      return false;
+    }
 
     const result = await this.options.decisions.decide(
-      this.buildDecisionInput(context, message.content),
-      [
-        {
-          type: "predicate",
-          name: "should_respond",
+      this.buildDecisionState(context, message.content),
+      {
+        should_respond: {
+          type: "noul",
           instructions:
-            "Is the latest message clearly directed at samebot, or clearly expecting a reply from samebot? Answer false if people are just talking to each other or it is ambiguous who the message is for.",
+            "samebot spoke just before the latest message. Should samebot reply to the latest message?",
+          criteria: {
+            true: "The latest message asks samebot a question, asks it to do something, or clearly needs an answer from samebot.",
+            false:
+              "People are talking to each other, it's unclear who it's for, it's only a reaction or opinion (\"nice\", \"lol\", \"fair\", \"thanks\"), or it tells samebot to stop or be quiet.",
+          },
         },
-      ],
+      },
     );
 
     return result.match(
       (answers) => {
         const probability = answers.probability("should_respond") ?? 0;
-        this.options.logger?.debug(
-          { probability },
-          "Response decision",
+        this.options.logger?.info(
+          { probability, messageId: message.id },
+          "Follow-up response decision",
         );
         return probability >= RESPOND_THRESHOLD;
       },
@@ -80,15 +104,19 @@ export class ResponseDecision {
     latestMessageContent: string,
   ): Promise<boolean> {
     const result = await this.options.decisions.decide(
-      this.buildDecisionInput(context, latestMessageContent),
-      [
-        {
-          type: "predicate",
-          name: "brief_reply_fits",
+      this.buildDecisionState(context, latestMessageContent),
+      {
+        brief_reply_fits: {
+          type: "noul",
           instructions:
-            "Would samebot replying with just a casual 'same' (or similar one-to-three word agreement) be a natural, fitting reply to the latest message? Answer false if the message asks a question, needs a substantive answer, or samebot already said 'same' recently.",
+            "Would samebot replying with just a casual 'same' (or a similar one-to-three word agreement) be a natural reply to the latest message?",
+          criteria: {
+            true: "The latest message states a feeling, take or experience that a friend could just agree with.",
+            false:
+              "The message asks a question, needs a substantive answer, or samebot already said 'same' recently.",
+          },
         },
-      ],
+      },
     );
 
     return result.match(
@@ -103,15 +131,18 @@ export class ResponseDecision {
     latestMessageContent: string,
   ): Promise<boolean> {
     const result = await this.options.decisions.decide(
-      this.buildDecisionInput(context, latestMessageContent),
-      [
-        {
-          type: "predicate",
-          name: "should_react",
+      this.buildDecisionState(context, latestMessageContent),
+      {
+        should_react: {
+          type: "noul",
           instructions:
-            "Would an emoji reaction from samebot on the latest message feel fun and natural (e.g. it is funny, notable, or emotionally expressive)?",
+            "Would an emoji reaction from samebot on the latest message feel fun and natural?",
+          criteria: {
+            true: "The message is funny, notable, or emotionally expressive.",
+            false: "The message is routine or logistical.",
+          },
         },
-      ],
+      },
     );
     return result.match(
       (answers) => (answers.probability("should_react") ?? 0) >= REACT_THRESHOLD,
@@ -119,38 +150,32 @@ export class ResponseDecision {
     );
   }
 
-  buildDecisionInput(context: AgentContext, latestMessageContent: string) {
-    return `Discord group chat. samebot is a sarcastic British bot who participates in the conversation.
-
-Recent conversation:
-${this.buildConversationContext(context)}
-
-Latest message: ${latestMessageContent || "(silent)"}`;
+  buildDecisionState(context: AgentContext, latestMessageContent: string) {
+    const recent = this.buildRecentMessages(context);
+    return {
+      setting: SETTING,
+      recent_messages: recent,
+      latest_message: {
+        author: recent.at(-1)?.author ?? "user",
+        text: latestMessageContent || "(no text)",
+      },
+    };
   }
 
-  buildConversationContext(context: AgentContext): string {
+  /** The last few messages, oldest first, ending with the latest. */
+  buildRecentMessages(context: AgentContext): DecisionMessage[] {
     const now = Date.now();
-    const lines: string[] = [];
-
-    for (const message of context.history.slice(-CONTEXT_MESSAGES)) {
-      if (message.role === "assistant" && message.content === "(silent)") {
-        continue;
-      }
-
-      const timeAgo = Math.round((now - message.timestamp) / 1000);
-      const timeAgoText =
-        timeAgo < 60
-          ? `${timeAgo}s ago`
-          : timeAgo < 3600
-            ? `${Math.round(timeAgo / 60)}m ago`
-            : `${Math.round(timeAgo / 3600)}h ago`;
-
-      const author =
-        message.role === "assistant" ? "samebot" : (message.author ?? "user");
-
-      lines.push(`[${timeAgoText}] ${author}: ${message.content}`);
-    }
-
-    return lines.join("\n");
+    return context.history
+      .slice(-CONTEXT_MESSAGES)
+      .filter(
+        (message) =>
+          !(message.role === "assistant" && message.content === "(silent)"),
+      )
+      .map((message) => ({
+        author:
+          message.role === "assistant" ? "samebot" : (message.author ?? "user"),
+        seconds_ago: Math.max(0, Math.round((now - message.timestamp) / 1000)),
+        text: message.content,
+      }));
   }
 }
