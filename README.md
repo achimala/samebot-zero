@@ -6,7 +6,7 @@ A single-process TypeScript Discord bot. It keeps the fun conversational tone, e
 
 | Job | Model |
 |---|---|
-| Conversation agent (tools, web search, vision) | Claude Sonnet 5.5 via the Anthropic SDK tool runner |
+| Conversation agent (tools, web search, vision) | Claude Haiku 5.5 via the Anthropic SDK tool runner |
 | Quick text jobs (emoji picks, names, brief replies) | Claude Haiku 5.5 |
 | Creative prompt writing (scrapbook art, robot emoji) | Claude Sonnet 5.5 |
 | Image of the day ideation | Claude Opus 5.5 |
