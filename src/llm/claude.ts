@@ -33,6 +33,9 @@ export const WEB_SEARCH_TOOL: BetaToolUnion = {
   type: "web_search_20260318",
   name: "web_search",
   max_uses: 3,
+  // Direct calls only: from code execution the model gets raw result data
+  // to parse, which is slow and leaks "the results came back odd" chatter.
+  allowed_callers: ["direct"],
 };
 
 const DEFAULT_MAX_TOKENS = 1024;
