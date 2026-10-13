@@ -13,11 +13,19 @@ import {
   TextInputBuilder,
   TextInputStyle,
 } from "discord.js";
-import { Octokit } from "@octokit/rest";
+import type { ResultAsync } from "neverthrow";
 import { type Feature, type RuntimeContext } from "../core/runtime";
 import { CursorClient, prUrlOf, type StartedRun } from "../cursor/client";
+import {
+  REPOSITORY,
+  closePullRequest,
+  listAgentPullRequests,
+  mergePullRequest,
+  pullNumberFromUrl,
+} from "../github/pull-requests";
 
-const REPOSITORY = "achimala/samebot-zero";
+const MISSING_GITHUB_TOKEN =
+  "has no GitHub token saved. They need to press Merge PR on any coding agent's status message once to save one.";
 
 type StatusPayload = {
   embeds: EmbedBuilder[];
@@ -74,8 +82,10 @@ export class AgentLaunchFeature implements Feature {
   private async handleAgentLaunch(interaction: ChatInputCommandInteraction) {
     const instructions = interaction.options.getString("instructions", true);
     await interaction.deferReply();
-    await this.launch(instructions, instructions, (payload) =>
-      interaction.editReply(payload),
+    await this.start(
+      instructions,
+      () => this.cursorClient.launchAgent(instructions),
+      (payload) => interaction.editReply(payload),
     );
   }
 
@@ -84,10 +94,110 @@ export class AgentLaunchFeature implements Feature {
    * channel. Resolves once the agent has started; the run is tracked in the
    * background.
    */
-  async launchFromChat(
+  launchFromChat(channelId: string, task: string, prompt: string) {
+    return this.startInChannel(channelId, task, () =>
+      this.cursorClient.launchAgent(prompt),
+    );
+  }
+
+  /** Sends extra instructions to an existing agent as a follow-up run. */
+  amendFromChat(channelId: string, agentId: string, instructions: string) {
+    return this.startInChannel(channelId, instructions, () =>
+      this.cursorClient.addFollowUp(agentId, instructions),
+    );
+  }
+
+  /** Recent agents on this repo and their open PRs, as text for the model. */
+  async listForChat(): Promise<string> {
+    const [agentsResult, pullRequestsResult] = await Promise.all([
+      this.cursorClient.listAgents(),
+      listAgentPullRequests(),
+    ]);
+    const agentsText = agentsResult.match(
+      (agents) =>
+        agents.length === 0
+          ? "No coding agents."
+          : agents
+              .map(
+                (agent) =>
+                  `- ${agent.agentId} (${agent.status ?? "unknown"}, started ${agent.createdAt ? new Date(agent.createdAt).toISOString() : "unknown"}): ${agent.name}`,
+              )
+              .join("\n"),
+      (error) => `Failed to list agents: ${error.message}`,
+    );
+    const pullRequestsText = pullRequestsResult.match(
+      (pullRequests) =>
+        pullRequests.length === 0
+          ? "No open coding agent PRs."
+          : pullRequests
+              .map(
+                (pullRequest) =>
+                  `- #${pullRequest.number}${pullRequest.draft ? " (draft)" : ""}: ${pullRequest.title} ${pullRequest.url}`,
+              )
+              .join("\n"),
+      (error) => `Failed to list PRs: ${error.message}`,
+    );
+    return `Coding agents, newest first:\n${agentsText}\n\nOpen coding agent PRs:\n${pullRequestsText}`;
+  }
+
+  async cancelFromChat(agentId: string): Promise<string> {
+    const result = await this.cursorClient.cancelAgent(agentId);
+    return result.match(
+      (cancelledCount) =>
+        cancelledCount === 0
+          ? `Agent ${agentId} has nothing running.`
+          : `Cancelled agent ${agentId}.`,
+      (error) => `Failed to cancel agent ${agentId}: ${error.message}`,
+    );
+  }
+
+  /** Merges with the GitHub token of the person who asked. */
+  mergeFromChat(discordUserId: string, authorName: string, pullNumber: number) {
+    return this.withGitHubToken(
+      discordUserId,
+      authorName,
+      (githubToken) => mergePullRequest(githubToken, pullNumber),
+      `Merged PR #${pullNumber}.`,
+      `Failed to merge PR #${pullNumber}`,
+    );
+  }
+
+  /** Closes with the GitHub token of the person who asked. */
+  closeFromChat(discordUserId: string, authorName: string, pullNumber: number) {
+    return this.withGitHubToken(
+      discordUserId,
+      authorName,
+      (githubToken) => closePullRequest(githubToken, pullNumber),
+      `Closed PR #${pullNumber} and deleted its branch.`,
+      `Failed to close PR #${pullNumber}`,
+    );
+  }
+
+  private async withGitHubToken(
+    discordUserId: string,
+    authorName: string,
+    action: (githubToken: string) => ResultAsync<void, Error>,
+    successText: string,
+    failureText: string,
+  ): Promise<string> {
+    const githubToken = await this.ctx.supabase.getGitHubToken(discordUserId);
+    if (!githubToken) {
+      return `${authorName} ${MISSING_GITHUB_TOKEN}`;
+    }
+    const result = await action(githubToken);
+    return result.match(
+      () => successText,
+      (error) => {
+        this.ctx.logger.error({ err: error }, failureText);
+        return `${failureText}: ${error.message}`;
+      },
+    );
+  }
+
+  private async startInChannel(
     channelId: string,
     task: string,
-    prompt: string,
+    startRun: () => ResultAsync<StartedRun, Error>,
   ): Promise<string> {
     const channel = await this.ctx.discord.channels.fetch(channelId);
     if (!channel || !channel.isSendable()) {
@@ -102,37 +212,37 @@ export class AgentLaunchFeature implements Feature {
       }
     };
     return new Promise((resolve) => {
-      void this.launch(task, prompt, update, resolve);
+      void this.start(task, startRun, update, resolve);
     });
   }
 
   /**
-   * Launches an agent and keeps its status embed up to date. `onStarted`
-   * fires as soon as the launch succeeds or fails.
+   * Starts a run and keeps its status embed up to date. `onStarted` fires as
+   * soon as the run starts or fails to.
    */
-  private async launch(
+  private async start(
     task: string,
-    prompt: string,
+    startRun: () => ResultAsync<StartedRun, Error>,
     update: StatusUpdate,
     onStarted?: (outcome: string) => void,
   ) {
     try {
       await update(this.statusPayload("pending", task));
 
-      const launchResult = await this.cursorClient.launchAgent(prompt);
-      if (launchResult.isErr()) {
-        onStarted?.(`Failed to start agent: ${launchResult.error.message}`);
+      const startResult = await startRun();
+      if (startResult.isErr()) {
+        onStarted?.(`Failed to start agent: ${startResult.error.message}`);
         await update(
-          this.statusPayload("failed", task, undefined, launchResult.error.message),
+          this.statusPayload("failed", task, undefined, startResult.error.message),
         );
         return;
       }
       onStarted?.(
-        "Started a coding agent; its status and PR link are posted in the channel.",
+        `Started coding agent ${startResult.value.agentId}; its status and PR link are posted in the channel.`,
       );
-      await this.reportRun(update, launchResult.value, task);
+      await this.reportRun(update, startResult.value, task);
     } catch (error) {
-      this.ctx.logger.error({ err: error }, "Agent launch failed");
+      this.ctx.logger.error({ err: error }, "Agent start failed");
       onStarted?.("Failed to start agent.");
     }
   }
@@ -431,145 +541,63 @@ export class AgentLaunchFeature implements Feature {
     githubToken: string,
     messageOverride?: Message,
   ) {
-    const prMatch = prUrl.match(
-      /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)$/,
-    );
-
-    if (!prMatch || !prMatch[1] || !prMatch[2] || !prMatch[3]) {
-      if (interaction.isButton()) {
-        await interaction.editReply({
-          content: "❌ Invalid PR URL format",
-        });
-      }
+    const pullNumber = pullNumberFromUrl(prUrl);
+    if (pullNumber === null) {
+      await interaction.editReply({ content: "❌ Invalid PR URL format" });
       return;
     }
 
-    const owner = prMatch[1];
-    const repo = prMatch[2];
-    const prNumber = prMatch[3];
+    const mergeResult = await mergePullRequest(githubToken, pullNumber);
+    if (mergeResult.isErr()) {
+      this.ctx.logger.error({ err: mergeResult.error, prUrl }, "Failed to merge PR");
+      await interaction.editReply({
+        content: `❌ Failed to merge PR: ${mergeResult.error.message}`,
+      });
+      return;
+    }
 
-    const githubClient = new Octokit({
-      auth: githubToken,
+    await interaction.editReply({
+      content: `✅ Successfully merged PR #${pullNumber}`,
     });
 
-    try {
-      const pullNumberInt = Number.parseInt(prNumber, 10);
-
-      const pr = await githubClient.pulls.get({
-        owner,
-        repo,
-        pull_number: pullNumberInt,
+    const message = messageOverride ?? interaction.message;
+    if (message && !message.partial && message.embeds[0]) {
+      const embed = message.embeds[0];
+      const updatedEmbed = EmbedBuilder.from(embed).addFields({
+        name: "Merge Status",
+        value: "✅ Merged",
       });
 
-      if (pr.data.draft) {
-        try {
-          const getPrNodeIdQuery = `
-            query($owner: String!, $repo: String!, $number: Int!) {
-              repository(owner: $owner, name: $repo) {
-                pullRequest(number: $number) {
-                  id
-                }
-              }
-            }
-          `;
-
-          const nodeIdResponse = (await githubClient.graphql(getPrNodeIdQuery, {
-            owner,
-            repo,
-            number: pullNumberInt,
-          })) as { repository: { pullRequest: { id: string } } };
-
-          const nodeId = nodeIdResponse.repository.pullRequest.id;
-
-          const markReadyMutation = `
-            mutation($pullRequestId: ID!) {
-              markPullRequestReadyForReview(input: {pullRequestId: $pullRequestId}) {
-                pullRequest {
-                  id
-                  isDraft
-                }
-              }
-            }
-          `;
-
-          await githubClient.graphql(markReadyMutation, {
-            pullRequestId: nodeId,
-          });
-        } catch (updateError) {
-          const updateErrorMessage =
-            updateError instanceof Error
-              ? updateError.message
-              : String(updateError);
-          if (updateErrorMessage.includes("Resource not accessible")) {
-            throw new Error(
-              "PR is a draft and token lacks permission to convert it. Please mark the PR as ready manually or grant 'Pull requests: Write' permission to your token.",
-            );
-          }
-          throw updateError;
-        }
-      }
-
-      await githubClient.pulls.merge({
-        owner,
-        repo,
-        pull_number: pullNumberInt,
-        merge_method: "squash",
-      });
-
-      if (interaction.isButton()) {
-        await interaction.editReply({
-          content: `✅ Successfully merged PR #${prNumber}`,
-        });
-      }
-
-      const message = messageOverride ?? interaction.message;
-      if (message && !message.partial && message.embeds[0]) {
-        const embed = message.embeds[0];
-        const updatedEmbed = EmbedBuilder.from(embed).addFields({
-          name: "Merge Status",
-          value: "✅ Merged",
-        });
-
-        const filteredComponents: ActionRowBuilder<ButtonBuilder>[] = [];
-        for (const row of message.components) {
-          if (row.type === 1) {
-            const filteredButtons: ButtonBuilder[] = [];
-            for (const component of row.components) {
-              if (component.type === 2 && component.customId) {
-                if (
-                  !component.customId.startsWith("merge-") &&
-                  !component.customId.startsWith("followup-")
-                ) {
-                  filteredButtons.push(ButtonBuilder.from(component));
-                }
-              } else if (component.type === 2) {
+      const filteredComponents: ActionRowBuilder<ButtonBuilder>[] = [];
+      for (const row of message.components) {
+        if (row.type === 1) {
+          const filteredButtons: ButtonBuilder[] = [];
+          for (const component of row.components) {
+            if (component.type === 2 && component.customId) {
+              if (
+                !component.customId.startsWith("merge-") &&
+                !component.customId.startsWith("followup-")
+              ) {
                 filteredButtons.push(ButtonBuilder.from(component));
               }
-            }
-            if (filteredButtons.length > 0) {
-              filteredComponents.push(
-                new ActionRowBuilder<ButtonBuilder>().addComponents(
-                  filteredButtons,
-                ),
-              );
+            } else if (component.type === 2) {
+              filteredButtons.push(ButtonBuilder.from(component));
             }
           }
+          if (filteredButtons.length > 0) {
+            filteredComponents.push(
+              new ActionRowBuilder<ButtonBuilder>().addComponents(
+                filteredButtons,
+              ),
+            );
+          }
         }
+      }
 
-        await message.edit({
-          embeds: [updatedEmbed],
-          components: filteredComponents,
-        });
-      }
-    } catch (error) {
-      this.ctx.logger.error({ err: error, prUrl }, "Failed to merge PR");
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      if (interaction.isButton()) {
-        await interaction.editReply({
-          content: `❌ Failed to merge PR: ${errorMessage}`,
-        });
-      }
+      await message.edit({
+        embeds: [updatedEmbed],
+        components: filteredComponents,
+      });
     }
   }
 
@@ -580,25 +608,10 @@ export class AgentLaunchFeature implements Feature {
     );
 
     await interaction.deferReply();
-    const update: StatusUpdate = (payload) => interaction.editReply(payload);
-    await update(this.statusPayload("pending", instructions));
-
-    const followUpResult = await this.cursorClient.addFollowUp(
-      agentId,
+    await this.start(
       instructions,
+      () => this.cursorClient.addFollowUp(agentId, instructions),
+      (payload) => interaction.editReply(payload),
     );
-    if (followUpResult.isErr()) {
-      await update(
-        this.statusPayload(
-          "failed",
-          instructions,
-          undefined,
-          followUpResult.error.message,
-        ),
-      );
-      return;
-    }
-
-    await this.reportRun(update, followUpResult.value, instructions);
   }
 }

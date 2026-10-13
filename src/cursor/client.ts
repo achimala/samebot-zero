@@ -1,4 +1,9 @@
-import { Agent, type Run, type RunResult } from "@cursor/sdk";
+import {
+  Agent,
+  type Run,
+  type RunResult,
+  type SDKAgentInfo,
+} from "@cursor/sdk";
 import { type Logger } from "pino";
 import { ResultAsync } from "neverthrow";
 
@@ -50,6 +55,35 @@ export class CursorClient {
       });
       const run = await agent.send(instructions);
       return { agentId, run };
+    });
+  }
+
+  /** The most recent agents on this repo, newest first. */
+  listAgents(): ResultAsync<SDKAgentInfo[], Error> {
+    return this.attempt("list agents", async () => {
+      const { items } = await Agent.list({
+        runtime: "cloud",
+        apiKey: this.apiKey,
+        limit: 20,
+      });
+      return items.filter(
+        (agent) =>
+          agent.runtime === "cloud" &&
+          (agent.repos ?? []).some((repo) => repo.includes(this.repository)),
+      );
+    });
+  }
+
+  /** Cancels every run of the agent that is still going. Returns how many. */
+  cancelAgent(agentId: string): ResultAsync<number, Error> {
+    return this.attempt("cancel agent", async () => {
+      const { items } = await Agent.listRuns(agentId, {
+        runtime: "cloud",
+        apiKey: this.apiKey,
+      });
+      const runningRuns = items.filter((run) => run.status === "running");
+      await Promise.all(runningRuns.map((run) => run.cancel()));
+      return runningRuns.length;
     });
   }
 

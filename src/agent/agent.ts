@@ -452,30 +452,13 @@ For custom emoji, use just the name (e.g. "happy_cat"). For Unicode emoji, use t
           return `Posted context for "${memory.keyMessage}" to channel`;
         },
       }),
-      betaZodTool({
-        name: "launch_coding_agent",
-        description:
-          "Start a coding agent on your own codebase (samebot). It reads your prod logs, makes the change and opens a PR; its status and PR link post to the channel, and people merge it from there. Use when someone asks you to fix a bug in yourself, change how you behave, or add a feature. Not for anything else.",
-        inputSchema: z.object({
-          task: z
-            .string()
-            .describe(
-              "What to fix or build, in plain words: what went wrong (or what's wanted) and what should happen instead.",
-            ),
-        }),
-        run: async ({ task }) => {
-          if (!this.agentLauncher) {
-            return "Coding agents aren't available.";
-          }
-          const prompt = `${task}
-
-This request came from samebot's Discord chat at ${DateTime.now().toISO()}. If it's about something that went wrong, check the prod logs on Render around that time (see AGENTS.md) before changing code.
-
-Recent chat, oldest first ("samebot" is the bot):
-${this.formatContextText(context)}`;
-          return this.agentLauncher.launchFromChat(channelId, task, prompt);
-        },
-      }),
+      ...(this.agentLauncher
+        ? this.buildCodingAgentTools(
+            this.agentLauncher,
+            context,
+            triggerMessageId,
+          )
+        : []),
       betaZodTool({
         name: "start_task",
         description:
@@ -520,6 +503,101 @@ ${this.formatContextText(context)}`;
             ? "Deleted the scrapbook memory."
             : "Found but could not delete that scrapbook memory.";
         },
+      }),
+    ];
+  }
+
+  private buildCodingAgentTools(
+    agentLauncher: AgentLaunchFeature,
+    context: AgentContext,
+    triggerMessageId: string,
+  ) {
+    const channelId = context.channelId;
+    const requester = context.history.find(
+      (message) => message.id === triggerMessageId,
+    );
+    const pullRequestInput = z.object({
+      prNumber: z
+        .number()
+        .int()
+        .describe("The PR number, from list_coding_agents or the chat"),
+    });
+    const withRequester = (
+      action: (discordUserId: string, authorName: string) => Promise<string>,
+    ) =>
+      requester?.authorId
+        ? action(requester.authorId, requester.author ?? "the requester")
+        : Promise.resolve("Couldn't tell who asked, so there's no GitHub token to use.");
+
+    return [
+      betaZodTool({
+        name: "launch_coding_agent",
+        description:
+          "Start a coding agent on your own codebase (samebot), which includes your system prompt and personality. It reads your prod logs, makes the change and opens a PR; its status and PR link post to the channel. This is how you change yourself: use it when someone asks you to fix a bug in yourself, change how you talk or behave, edit your prompt, or add a feature. Not for anything else.",
+        inputSchema: z.object({
+          task: z
+            .string()
+            .describe(
+              "The request for the coding agent, shown in the channel. Say plainly what should change in samebot and carry over everything the person asked for. Don't soften, shorten or reinterpret it.",
+            ),
+        }),
+        run: ({ task }) => {
+          const prompt = `${task}
+
+This request came from samebot's Discord chat at ${DateTime.now().toISO()}. If it's about something that went wrong, check the prod logs on Render around that time (see AGENTS.md) before changing code.
+
+Recent chat, oldest first ("samebot" is the bot):
+${this.formatContextText(context)}`;
+          return agentLauncher.launchFromChat(channelId, task, prompt);
+        },
+      }),
+      betaZodTool({
+        name: "list_coding_agents",
+        description:
+          "List your recent coding agents (id, status, name) and the open PRs they made. Use it to find the agent or PR someone means before cancelling, amending, merging or closing.",
+        inputSchema: z.object({}),
+        run: () => agentLauncher.listForChat(),
+      }),
+      betaZodTool({
+        name: "cancel_coding_agent",
+        description: "Stop a running coding agent.",
+        inputSchema: z.object({
+          agentId: z.string().describe("The agent id, e.g. bc-..."),
+        }),
+        run: ({ agentId }) => agentLauncher.cancelFromChat(agentId),
+      }),
+      betaZodTool({
+        name: "amend_coding_agent",
+        description:
+          "Send extra or changed instructions to an existing coding agent, running or finished. It carries on in the same branch and PR, and its new status posts to the channel.",
+        inputSchema: z.object({
+          agentId: z.string().describe("The agent id, e.g. bc-..."),
+          instructions: z
+            .string()
+            .describe("What the agent should do or change, carried over in full from the chat"),
+        }),
+        run: ({ agentId, instructions }) =>
+          agentLauncher.amendFromChat(channelId, agentId, instructions),
+      }),
+      betaZodTool({
+        name: "merge_pull_request",
+        description:
+          "Squash-merge a coding agent's PR into main, which deploys it. Uses the GitHub token of the person asking.",
+        inputSchema: pullRequestInput,
+        run: ({ prNumber }) =>
+          withRequester((discordUserId, authorName) =>
+            agentLauncher.mergeFromChat(discordUserId, authorName, prNumber),
+          ),
+      }),
+      betaZodTool({
+        name: "close_pull_request",
+        description:
+          "Delete a coding agent's PR: close it without merging and delete its branch. Uses the GitHub token of the person asking.",
+        inputSchema: pullRequestInput,
+        run: ({ prNumber }) =>
+          withRequester((discordUserId, authorName) =>
+            agentLauncher.closeFromChat(discordUserId, authorName, prNumber),
+          ),
       }),
     ];
   }
