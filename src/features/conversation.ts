@@ -205,41 +205,9 @@ export class ConversationFeature implements Feature {
       this.botUserId,
     );
 
-    let userMessageContent = incomingMessage.content || "";
-    let aphorismReply: string | null = null;
-
-    if (userMessageContent.length > 0) {
-      const shouldConvert = await shouldConvertToAphorism(
-        userMessageContent,
-        this.ctx.decisions,
-        this.ctx.logger,
-      );
-
-      if (shouldConvert) {
-        const converted = await convertToAphorism(
-          userMessageContent,
-          this.ctx.llm,
-          this.ctx.logger,
-        );
-        if (converted) {
-          userMessageContent = converted;
-          aphorismReply = converted;
-        }
-      }
-    }
-
-    const agentMessage = this.toAgentMessage({
-      ...incomingMessage,
-      content: userMessageContent,
-    });
-    this.appendHistory(context, agentMessage);
+    this.appendHistory(context, this.toAgentMessage(incomingMessage));
     // Warm memory in parallel with the reply decision.
     this.ctx.memory.prefetchPromptContext(this.toAgentContext(context));
-
-    if (aphorismReply) {
-      await this.sendReply(message.channelId, context, aphorismReply);
-      return;
-    }
 
     const agentContext = this.toAgentContext(context);
     const shouldRespond = await this.responseDecision.shouldRespond(
@@ -248,6 +216,27 @@ export class ConversationFeature implements Feature {
     );
 
     if (!shouldRespond) {
+      // The gimmick only runs on messages that wouldn't get a reply anyway,
+      // so it never takes the place of an answer.
+      const userMessageContent = incomingMessage.content;
+      if (
+        userMessageContent.length > 0 &&
+        (await shouldConvertToAphorism(
+          userMessageContent,
+          this.ctx.decisions,
+          this.ctx.logger,
+        ))
+      ) {
+        const aphorism = await convertToAphorism(
+          userMessageContent,
+          this.ctx.llm,
+          this.ctx.logger,
+        );
+        if (aphorism) {
+          await this.sendReply(message.channelId, context, aphorism);
+          return;
+        }
+      }
       if (Math.random() < AUTO_REACT_PROBABILITY) {
         await this.handleAutoReact(message, agentContext);
       }
