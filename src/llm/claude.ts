@@ -167,8 +167,18 @@ export class ClaudeClient {
   }
 }
 
+/**
+ * The reply is the text after the last tool block. Server tools like web
+ * search run inside one message, so earlier text blocks are the model
+ * narrating its searches ("i'll have a quick look") and aren't for chat.
+ */
 export function extractText(message: BetaMessage): string {
+  let start = message.content.length;
+  while (start > 0 && message.content[start - 1]?.type === "text") {
+    start--;
+  }
   return message.content
+    .slice(start)
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("");
